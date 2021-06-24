@@ -1,0 +1,41 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cert-manager-sync-v1
+  namespace: cert-manager
+  labels:
+    app: cert-manager-sync
+    version: v1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cert-manager-sync
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: cert-manager-sync
+        version: v1
+    spec:
+      serviceAccountName: cert-manager-sync
+      imagePullSecrets:
+        - name: regcred
+      containers:
+        - image: registry.example.com/devops/cert-manager-sync:v0.0.1
+          name: cert-manager-sync
+          env:
+            - name: INCAPSULA_API
+              value: "https://my.imperva.com/api/prov/v1"
+            - name: SECRETS_NAMESPACE
+              value: cert-manager
+            - name: AWS_REGION
+              value: us-east-1
+          resources:
+            limits:
+              cpu: 500m
+              memory: 500Mi
+            requests:
+              cpu: 500m
+              memory: 500Mi
