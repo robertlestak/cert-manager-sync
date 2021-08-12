@@ -73,3 +73,40 @@ func UploadIncapsulaCert(sec *IncapsulaSecret, cert *Certificate, siteID string)
 	l.Printf("incapsula response=%v", string(bd))
 	return err
 }
+
+func GetIncapsulaSiteStatus(sec *IncapsulaSecret, siteID string) (string, error) {
+	l := log.WithFields(
+		log.Fields{
+			"action": "GetIncapsulaSiteStatus",
+		},
+	)
+	l.Print("GetIncapsulaSiteStatus")
+	var err error
+	iurl := os.Getenv("INCAPSULA_API") + "/sites/status"
+	c := http.Client{}
+	data := url.Values{}
+	data.Set("api_id", sec.ID)
+	data.Set("site_id", siteID)
+	data.Set("api_key", sec.Key)
+	data.Set("tests", "services")
+	d := strings.NewReader(data.Encode())
+	req, rerr := http.NewRequest("POST", iurl, d)
+	if rerr != nil {
+		l.Printf("http.NewRequest error=%v", rerr)
+		return "", rerr
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	res, serr := c.Do(req)
+	if serr != nil {
+		l.Printf("c.Do error=%v", serr)
+		return "", serr
+	}
+	defer res.Body.Close()
+	bd, berr := ioutil.ReadAll(res.Body)
+	if berr != nil {
+		l.Printf("ioutil.ReadAll error=%v", berr)
+		return "", berr
+	}
+	//l.Printf("incapsula response=%v", string(bd))
+	return string(bd), err
+}

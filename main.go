@@ -19,11 +19,14 @@ import (
 
 var (
 	// k8sClient contains the kubernetes API client
-	k8sClient *kubernetes.Clientset
+	k8sClient    *kubernetes.Clientset
+	operatorName string
+	cache        []*Certificate
 )
 
 // Certificate represents a properly formatted TLS certificate
 type Certificate struct {
+	SecretName  string
 	Chain       []byte
 	Certificate []byte
 	Key         []byte
@@ -67,6 +70,41 @@ func createKubeClient() error {
 	return nil
 }
 
+func addToCache(c *Certificate) {
+	var nc []*Certificate
+	for _, v := range cache {
+		if v.SecretName != c.SecretName {
+			nc = append(nc, v)
+		}
+	}
+	nc = append(nc, c)
+	cache = nc
+}
+
+func cacheChanged(s corev1.Secret) bool {
+	l := log.WithFields(
+		log.Fields{
+			"action":     "cacheChanged",
+			"secretName": s.ObjectMeta.Name,
+		},
+	)
+	l.Print("check cacheChanged")
+	if len(cache) == 0 {
+		l.Print("cache is empty")
+		return true
+	}
+	l.Printf("cache length: %d", len(cache))
+	for _, v := range cache {
+		tc := secretToCert(s)
+		if v.SecretName == s.ObjectMeta.Name && string(v.Certificate) != string(tc.Certificate) {
+			l.Printf("cache changed: %s", s.ObjectMeta.Name)
+			return true
+		}
+	}
+	l.Print("cache not changed")
+	return false
+}
+
 // getSecrets returns all sync-enabled secrets managed by the cert-manager-sync operator
 func getSecrets() ([]corev1.Secret, error) {
 	var slo []corev1.Secret
@@ -89,7 +127,7 @@ func getSecrets() ([]corev1.Secret, error) {
 		if len(s.Data["tls.crt"]) == 0 || len(s.Data["tls.key"]) == 0 {
 			continue
 		}
-		if s.Annotations["cert-manager-sync.lestak.sh/sync-enabled"] == "true" {
+		if s.Annotations[operatorName+"/sync-enabled"] == "true" {
 			l.Printf("cert secret: %s", s.ObjectMeta.Name)
 			slo = append(slo, s)
 		}
@@ -102,7 +140,7 @@ func getSecrets() ([]corev1.Secret, error) {
 func ACMCerts(s []corev1.Secret) []corev1.Secret {
 	var ac []corev1.Secret
 	for _, v := range s {
-		if v.Annotations["cert-manager-sync.lestak.sh/enabled"] == "true" {
+		if v.Annotations[operatorName+"/acm-enabled"] == "true" && cacheChanged(v) {
 			ac = append(ac, v)
 		}
 	}
@@ -114,7 +152,7 @@ func ACMCerts(s []corev1.Secret) []corev1.Secret {
 func IncapsulaCerts(s []corev1.Secret) []corev1.Secret {
 	var c []corev1.Secret
 	for _, v := range s {
-		if v.Annotations["cert-manager-sync.lestak.sh/incapsula-site-id"] != "" {
+		if v.Annotations[operatorName+"/incapsula-site-id"] != "" && cacheChanged(v) {
 			c = append(c, v)
 		}
 	}
@@ -123,7 +161,7 @@ func IncapsulaCerts(s []corev1.Secret) []corev1.Secret {
 
 // secretToCert converts a k8s secret to a properly-formatted TLS Certificate
 func secretToCert(s corev1.Secret) *Certificate {
-	return separateCerts(s.Data["ca.crt"], s.Data["tls.crt"], s.Data["tls.key"])
+	return separateCerts(s.ObjectMeta.Name, s.Data["ca.crt"], s.Data["tls.crt"], s.Data["tls.key"])
 }
 
 // secretToACMInput converts a k8s secret to a properly-formatted ACM Import object
@@ -134,15 +172,15 @@ func secretToACMInput(s corev1.Secret) (*acm.ImportCertificateInput, error) {
 			"secretName": s.ObjectMeta.Name,
 		},
 	)
-	im := separateCertsACM(s.Data["ca.crt"], s.Data["tls.crt"], s.Data["tls.key"])
+	im := separateCertsACM(s.ObjectMeta.Name, s.Data["ca.crt"], s.Data["tls.crt"], s.Data["tls.key"])
 	// secret already has an aws acm cert attached
-	if s.ObjectMeta.Annotations["cert-manager-sync.lestak.sh/acm-certificate-arn"] != "" {
-		im.CertificateArn = aws.String(s.ObjectMeta.Annotations["cert-manager-sync.lestak.sh/acm-certificate-arn"])
+	if s.ObjectMeta.Annotations[operatorName+"/acm-certificate-arn"] != "" {
+		im.CertificateArn = aws.String(s.ObjectMeta.Annotations[operatorName+"/acm-certificate-arn"])
 	} else {
 		// this is our first time sending to ACM, tag
 		var tags []*acm.Tag
 		tags = append(tags, &acm.Tag{
-			Key:   aws.String("cert-manager-sync.lestak.sh/secret-name"),
+			Key:   aws.String(operatorName + "/secret-name"),
 			Value: aws.String(s.ObjectMeta.Name),
 		})
 		im.Tags = tags
@@ -194,7 +232,7 @@ func handleACMCert(s corev1.Secret) error {
 		l.Print(cerr)
 		return cerr
 	}
-	s.ObjectMeta.Annotations["cert-manager-sync.lestak.sh/acm-certificate-arn"] = certArn
+	s.ObjectMeta.Annotations[operatorName+"/acm-certificate-arn"] = certArn
 	l.Printf("certArn=%v", certArn)
 	sc := k8sClient.CoreV1().Secrets(os.Getenv("SECRETS_NAMESPACE"))
 	uo := metav1.UpdateOptions{}
@@ -225,6 +263,8 @@ func handleACMCerts(ss []corev1.Secret) error {
 			l.Printf("handleACMCert error=%v", err)
 			return err
 		}
+		c := secretToCert(s)
+		addToCache(c)
 	}
 	return nil
 }
@@ -240,22 +280,33 @@ func handleIncapsulaCerts(ss []corev1.Secret) error {
 	l.Print("handleIncapsulaCerts")
 	for _, s := range ss {
 		is := &IncapsulaSecret{
-			Name: s.Annotations["cert-manager-sync.lestak.sh/incapsula-secret-name"],
+			Name: s.Annotations[operatorName+"/incapsula-secret-name"],
 		}
 		gerr := is.Get(context.Background())
 		if gerr != nil {
 			l.Printf("is.Get error=%v", gerr)
 			return gerr
 		}
+		// ensure site has ssl enabled befure uploading cert
+		_, serr := GetIncapsulaSiteStatus(
+			is,
+			s.Annotations[operatorName+"/incapsula-site-id"],
+		)
+		if serr != nil {
+			l.Printf("GetIncapsulaSiteStatus error=%v", serr)
+			return serr
+		}
+		c := secretToCert(s)
 		uerr := UploadIncapsulaCert(
 			is,
-			secretToCert(s),
-			s.Annotations["cert-manager-sync.lestak.sh/incapsula-site-id"],
+			c,
+			s.Annotations[operatorName+"/incapsula-site-id"],
 		)
 		if uerr != nil {
 			l.Printf("UploadIncapsulaCert error=%v", uerr)
 			return uerr
 		}
+		addToCache(c)
 	}
 	return nil
 }
@@ -267,6 +318,11 @@ func init() {
 		},
 	)
 	l.Print("init")
+	if os.Getenv("OPERATOR_NAME") == "" {
+		l.Fatal("OPERATOR_NAME not set")
+	} else {
+		operatorName = os.Getenv("OPERATOR_NAME")
+	}
 	cerr := createKubeClient()
 	if cerr != nil {
 		l.Fatal(cerr)

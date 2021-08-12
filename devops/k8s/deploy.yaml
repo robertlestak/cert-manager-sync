@@ -32,6 +32,8 @@ spec:
               value: cert-manager
             - name: AWS_REGION
               value: us-east-1
+            - name: OPERATOR_NAME
+              value: "cert-manager-sync.lestak.sh"
           resources:
             limits:
               cpu: 500m

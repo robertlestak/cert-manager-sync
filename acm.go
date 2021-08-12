@@ -29,12 +29,13 @@ func CreateAWSSession() (*session.Session, error) {
 }
 
 // separateCerts ensures that certificates are configured appropriately
-func separateCerts(ca, crt, key []byte) *Certificate {
+func separateCerts(name string, ca, crt, key []byte) *Certificate {
 	b := "-----BEGIN CERTIFICATE-----\n"
 	str := strings.Split(string(crt), b)
 	nc := b + str[1]
 	ch := strings.Join(str[:len(str)-1], b)
 	cert := &Certificate{
+		SecretName:  name,
 		Chain:       []byte(ch),
 		Certificate: []byte(nc),
 		Key:         key,
@@ -43,8 +44,8 @@ func separateCerts(ca, crt, key []byte) *Certificate {
 }
 
 // separateCertsACM wraps separateCerts and returns an acm ImportCertificateInput Object
-func separateCertsACM(ca, crt, key []byte) *acm.ImportCertificateInput {
-	cert := separateCerts(ca, crt, key)
+func separateCertsACM(name string, ca, crt, key []byte) *acm.ImportCertificateInput {
+	cert := separateCerts(name, ca, crt, key)
 	im := &acm.ImportCertificateInput{
 		CertificateChain: cert.Chain,
 		Certificate:      cert.Certificate,

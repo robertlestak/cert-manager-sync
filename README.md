@@ -72,7 +72,3 @@ Create `regcred` registry credential secret in `cert-manager` namespace.
 
 kubectl apply -f devops/k8s
 ```
-
-## Future Optimizations
-
-Currently this re-syncs the cert on every main loop. A future optimization will ensure the certificate is only synced on change to reduce API calls.
