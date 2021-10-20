@@ -27,6 +27,8 @@ var (
 // Certificate represents a properly formatted TLS certificate
 type Certificate struct {
 	SecretName  string
+	Annotations map[string]string
+	Labels      map[string]string
 	Chain       []byte
 	Certificate []byte
 	Key         []byte
@@ -81,6 +83,18 @@ func addToCache(c *Certificate) {
 	cache = nc
 }
 
+func stringMapChanged(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return true
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return true
+		}
+	}
+	return false
+}
+
 func cacheChanged(s corev1.Secret) bool {
 	l := log.WithFields(
 		log.Fields{
@@ -89,14 +103,24 @@ func cacheChanged(s corev1.Secret) bool {
 		},
 	)
 	l.Print("check cacheChanged")
+	if os.Getenv("CACHE_DISABLE") == "true" {
+		l.Print("cache disabled")
+		return true
+	}
 	if len(cache) == 0 {
 		l.Print("cache is empty")
 		return true
 	}
 	l.Printf("cache length: %d", len(cache))
 	for _, v := range cache {
+		l.Debugf("checking cache for secret %s", v.SecretName)
 		tc := secretToCert(s)
-		if v.SecretName == s.ObjectMeta.Name && string(v.Certificate) != string(tc.Certificate) {
+		nameMatch := v.SecretName == s.ObjectMeta.Name
+		certChanged := string(v.Certificate) != string(tc.Certificate)
+		labelsChanged := stringMapChanged(v.Labels, tc.Labels)
+		annotationsChanged := stringMapChanged(v.Annotations, tc.Annotations)
+		l.Debugf("cache status %s: certChanged=%t labelsChanged=%t annotationsChanged=%t", v.SecretName, certChanged, labelsChanged, annotationsChanged)
+		if nameMatch && (certChanged || labelsChanged || annotationsChanged) {
 			l.Printf("cache changed: %s", s.ObjectMeta.Name)
 			return true
 		}
@@ -114,7 +138,7 @@ func getSecrets() ([]corev1.Secret, error) {
 			"action": "getSecrets",
 		},
 	)
-	l.Print("get secrets")
+	l.Print("get secrets in namespace", os.Getenv("SECRETS_NAMESPACE"))
 	sc := k8sClient.CoreV1().Secrets(os.Getenv("SECRETS_NAMESPACE"))
 	lo := &metav1.ListOptions{}
 	sl, jerr := sc.List(context.Background(), *lo)
@@ -124,14 +148,17 @@ func getSecrets() ([]corev1.Secret, error) {
 	}
 	l.Printf("range secrets: %d", len(sl.Items))
 	for _, s := range sl.Items {
+		l.Debugf("secret=%s/%s labels=%v annotations=%v", s.ObjectMeta.Namespace, s.ObjectMeta.Name, s.ObjectMeta.Labels, s.ObjectMeta.Annotations)
 		if len(s.Data["tls.crt"]) == 0 || len(s.Data["tls.key"]) == 0 {
+			l.Debug("skipping secret without tls.crt or tls.key")
 			continue
 		}
 		if s.Annotations[operatorName+"/sync-enabled"] == "true" {
-			l.Printf("cert secret: %s", s.ObjectMeta.Name)
+			l.Printf("cert secret found: %s", s.ObjectMeta.Name)
 			slo = append(slo, s)
 		}
 	}
+	l.Debugf("returning %d enabled secrets", len(slo))
 	return slo, err
 }
 
@@ -161,7 +188,10 @@ func IncapsulaCerts(s []corev1.Secret) []corev1.Secret {
 
 // secretToCert converts a k8s secret to a properly-formatted TLS Certificate
 func secretToCert(s corev1.Secret) *Certificate {
-	return separateCerts(s.ObjectMeta.Name, s.Data["ca.crt"], s.Data["tls.crt"], s.Data["tls.key"])
+	c := separateCerts(s.ObjectMeta.Name, s.Data["ca.crt"], s.Data["tls.crt"], s.Data["tls.key"])
+	c.Annotations = s.Annotations
+	c.Labels = s.Labels
+	return c
 }
 
 // secretToACMInput converts a k8s secret to a properly-formatted ACM Import object
@@ -249,7 +279,7 @@ func handleACMCert(s corev1.Secret) error {
 }
 
 // handleACMCerts handles the sync of all ACM-enabled certs
-func handleACMCerts(ss []corev1.Secret) error {
+func handleACMCerts(ss []corev1.Secret) {
 	ss = ACMCerts(ss)
 	l := log.WithFields(
 		log.Fields{
@@ -257,20 +287,20 @@ func handleACMCerts(ss []corev1.Secret) error {
 		},
 	)
 	l.Print("handleACMCerts")
-	for _, s := range ss {
+	for i, s := range ss {
+		l.Debugf("processing secret %s (%d/%d)", s.ObjectMeta.Name, i+1, len(ss))
 		err := handleACMCert(s)
 		if err != nil {
 			l.Printf("handleACMCert error=%v", err)
-			return err
+			continue
 		}
 		c := secretToCert(s)
 		addToCache(c)
 	}
-	return nil
 }
 
 // handleIncapsulaCerts handles the sync of all Incapsula-enabled certs
-func handleIncapsulaCerts(ss []corev1.Secret) error {
+func handleIncapsulaCerts(ss []corev1.Secret) {
 	ss = IncapsulaCerts(ss)
 	l := log.WithFields(
 		log.Fields{
@@ -278,14 +308,18 @@ func handleIncapsulaCerts(ss []corev1.Secret) error {
 		},
 	)
 	l.Print("handleIncapsulaCerts")
-	for _, s := range ss {
+	for i, s := range ss {
+		l.Debugf("processing secret %s (%d/%d)", s.ObjectMeta.Name, i+1, len(ss))
 		is := &IncapsulaSecret{
 			Name: s.Annotations[operatorName+"/incapsula-secret-name"],
 		}
 		gerr := is.Get(context.Background())
 		if gerr != nil {
-			l.Printf("is.Get error=%v", gerr)
-			return gerr
+			l.WithFields(log.Fields{
+				"siteID":     s.Annotations[operatorName+"/incapsula-site-id"],
+				"secretName": s.Annotations[operatorName+"/incapsula-secret-name"],
+			}).Printf("is.Get error=%v", gerr)
+			continue
 		}
 		// ensure site has ssl enabled befure uploading cert
 		_, serr := GetIncapsulaSiteStatus(
@@ -293,8 +327,11 @@ func handleIncapsulaCerts(ss []corev1.Secret) error {
 			s.Annotations[operatorName+"/incapsula-site-id"],
 		)
 		if serr != nil {
-			l.Printf("GetIncapsulaSiteStatus error=%v", serr)
-			return serr
+			l.WithFields(log.Fields{
+				"siteID":     s.Annotations[operatorName+"/incapsula-site-id"],
+				"secretName": s.Annotations[operatorName+"/incapsula-secret-name"],
+			}).Printf("GetIncapsulaSiteStatus error=%v", serr)
+			continue
 		}
 		c := secretToCert(s)
 		uerr := UploadIncapsulaCert(
@@ -303,15 +340,22 @@ func handleIncapsulaCerts(ss []corev1.Secret) error {
 			s.Annotations[operatorName+"/incapsula-site-id"],
 		)
 		if uerr != nil {
-			l.Printf("UploadIncapsulaCert error=%v", uerr)
-			return uerr
+			l.WithFields(log.Fields{
+				"siteID":     s.Annotations[operatorName+"/incapsula-site-id"],
+				"secretName": s.Annotations[operatorName+"/incapsula-secret-name"],
+			}).Printf("UploadIncapsulaCert error=%v", uerr)
+			continue
 		}
 		addToCache(c)
 	}
-	return nil
 }
 
 func init() {
+	ll, lerr := log.ParseLevel(os.Getenv("LOG_LEVEL"))
+	if lerr != nil {
+		ll = log.InfoLevel
+	}
+	log.SetLevel(ll)
 	l := log.WithFields(
 		log.Fields{
 			"action": "init",
@@ -335,14 +379,18 @@ func main() {
 			"action": "main",
 		},
 	)
+	l.Debug("starting")
 	// main loop
 	for {
 		l.Print("main loop")
+		l.Debug("main loop getSecrets")
 		as, serr := getSecrets()
 		if serr != nil {
 			l.Fatal(serr)
 		}
+		l.Debug("main handleACMCerts")
 		go handleACMCerts(as)
+		l.Debug("main handleIncapsulaCerts")
 		go handleIncapsulaCerts(as)
 		l.Printf("sleep main loop")
 		time.Sleep(time.Second * 60)

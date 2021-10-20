@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -33,11 +35,18 @@ func (s *IncapsulaSecret) Get(ctx context.Context) error {
 	return nil
 }
 
+// Incapsula response contains the response from Incapsula API
+type IncapsulaResponse struct {
+	Res        int    `json:"res"`
+	ResMessage string `json:"res_message"`
+}
+
 // UploadIncapsulaCert syncs a certificate with Incapsula site
 func UploadIncapsulaCert(sec *IncapsulaSecret, cert *Certificate, siteID string) error {
 	l := log.WithFields(
 		log.Fields{
 			"action": "UploadIncapsulaCert",
+			"siteID": siteID,
 		},
 	)
 	l.Print("UploadIncapsulaCert")
@@ -53,6 +62,7 @@ func UploadIncapsulaCert(sec *IncapsulaSecret, cert *Certificate, siteID string)
 	data.Set("certificate", bCert)
 	data.Set("private_key", bKey)
 	d := strings.NewReader(data.Encode())
+	l.Debugf("url=%s data=%s", iurl, data.Encode())
 	req, rerr := http.NewRequest("POST", iurl, d)
 	if rerr != nil {
 		l.Printf("http.NewRequest error=%v", rerr)
@@ -70,7 +80,17 @@ func UploadIncapsulaCert(sec *IncapsulaSecret, cert *Certificate, siteID string)
 		l.Printf("ioutil.ReadAll error=%v", berr)
 		return berr
 	}
-	l.Printf("incapsula response=%v", string(bd))
+	ir := &IncapsulaResponse{}
+	if err = json.Unmarshal(bd, ir); err != nil {
+		l.Printf("json.Unmarshal error=%v", err)
+		return err
+	}
+	l.Debugf("incapsula statusCode=%d response=%v", res.StatusCode, string(bd))
+	if ir.Res != 0 {
+		l.Printf("status=%v body=%s", res.StatusCode, string(bd))
+		return fmt.Errorf("incapsula upload failed, body=%s", string(bd))
+	}
+	l.Debugf("incapsula response=%v", string(bd))
 	return err
 }
 
@@ -78,6 +98,7 @@ func GetIncapsulaSiteStatus(sec *IncapsulaSecret, siteID string) (string, error)
 	l := log.WithFields(
 		log.Fields{
 			"action": "GetIncapsulaSiteStatus",
+			"siteID": siteID,
 		},
 	)
 	l.Print("GetIncapsulaSiteStatus")
@@ -90,6 +111,7 @@ func GetIncapsulaSiteStatus(sec *IncapsulaSecret, siteID string) (string, error)
 	data.Set("api_key", sec.Key)
 	data.Set("tests", "services")
 	d := strings.NewReader(data.Encode())
+	l.Debugf("url=%s data=%s", iurl, data.Encode())
 	req, rerr := http.NewRequest("POST", iurl, d)
 	if rerr != nil {
 		l.Printf("http.NewRequest error=%v", rerr)
@@ -107,6 +129,16 @@ func GetIncapsulaSiteStatus(sec *IncapsulaSecret, siteID string) (string, error)
 		l.Printf("ioutil.ReadAll error=%v", berr)
 		return "", berr
 	}
-	//l.Printf("incapsula response=%v", string(bd))
+	ir := &IncapsulaResponse{}
+	if err = json.Unmarshal(bd, ir); err != nil {
+		l.Printf("json.Unmarshal error=%v", err)
+		return string(bd), err
+	}
+	l.Debugf("incapsula statusCode=%d response=%v", res.StatusCode, string(bd))
+	if ir.Res != 0 {
+		l.Printf("status=%v body=%s", res.StatusCode, string(bd))
+		return string(bd), fmt.Errorf("incapsula upload failed, body=%s", string(bd))
+	}
+	l.Debugf("incapsula response=%v", string(bd))
 	return string(bd), err
 }
