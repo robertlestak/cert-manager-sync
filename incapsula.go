@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	log "github.com/sirupsen/logrus"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -141,4 +142,67 @@ func GetIncapsulaSiteStatus(sec *IncapsulaSecret, siteID string) (string, error)
 	}
 	l.Debugf("incapsula response=%v", string(bd))
 	return string(bd), err
+}
+
+// IncapsulaCerts accepts a slice of Secrets and returns only those configured
+// for replication to Incapsula
+func IncapsulaCerts(s []corev1.Secret) []corev1.Secret {
+	var c []corev1.Secret
+	for _, v := range s {
+		if v.Annotations[operatorName+"/incapsula-site-id"] != "" && cacheChanged(v) {
+			c = append(c, v)
+		}
+	}
+	return c
+}
+
+// handleIncapsulaCerts handles the sync of all Incapsula-enabled certs
+func handleIncapsulaCerts(ss []corev1.Secret) {
+	ss = IncapsulaCerts(ss)
+	l := log.WithFields(
+		log.Fields{
+			"action": "handleIncapsulaCerts",
+		},
+	)
+	l.Print("handleIncapsulaCerts")
+	for i, s := range ss {
+		l.Debugf("processing secret %s (%d/%d)", s.ObjectMeta.Name, i+1, len(ss))
+		is := &IncapsulaSecret{
+			Name: s.Annotations[operatorName+"/incapsula-secret-name"],
+		}
+		gerr := is.Get(context.Background())
+		if gerr != nil {
+			l.WithFields(log.Fields{
+				"siteID":     s.Annotations[operatorName+"/incapsula-site-id"],
+				"secretName": s.Annotations[operatorName+"/incapsula-secret-name"],
+			}).Printf("is.Get error=%v", gerr)
+			continue
+		}
+		// ensure site has ssl enabled befure uploading cert
+		_, serr := GetIncapsulaSiteStatus(
+			is,
+			s.Annotations[operatorName+"/incapsula-site-id"],
+		)
+		if serr != nil {
+			l.WithFields(log.Fields{
+				"siteID":     s.Annotations[operatorName+"/incapsula-site-id"],
+				"secretName": s.Annotations[operatorName+"/incapsula-secret-name"],
+			}).Printf("GetIncapsulaSiteStatus error=%v", serr)
+			continue
+		}
+		c := secretToCert(s)
+		uerr := UploadIncapsulaCert(
+			is,
+			c,
+			s.Annotations[operatorName+"/incapsula-site-id"],
+		)
+		if uerr != nil {
+			l.WithFields(log.Fields{
+				"siteID":     s.Annotations[operatorName+"/incapsula-site-id"],
+				"secretName": s.Annotations[operatorName+"/incapsula-secret-name"],
+			}).Printf("UploadIncapsulaCert error=%v", uerr)
+			continue
+		}
+		addToCache(c)
+	}
 }

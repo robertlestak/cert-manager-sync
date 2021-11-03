@@ -1,6 +1,6 @@
 # cert-manager-sync
 
-Enable Kubernetes `cert-manager` to sync TLS certificates to AWS ACM and Incapsula.
+Enable Kubernetes `cert-manager` to sync TLS certificates to AWS ACM, HashiCorp Vault, Incapsula, and ThreatX.
 
 ## Architecture
 
@@ -38,6 +38,22 @@ kubectl -n cert-manager \
 
 You will then annotate your k8s TLS secret with this secret name to tell the operator to retrieve the Incapsula API secret from this location.
 
+### ThreatX
+
+Create a ThreatX API Key and create a kube secret in the namespace in which the operator runs.
+
+```bash
+kubectl -n cert-manager \
+	create secret generic example-threatx-api-secret \
+	--from-literal api_token=XXXXX --from-literal customer_name=XXXXX
+```
+
+You will then annotate your k8s TLS secret with this secret name to tell the operator to retrieve the ThreatX API secret from this location.
+
+### HashiCorp Vault
+
+HashiCorp Vault relies on the [Kubernetes Auth Method](https://www.vaultproject.io/docs/auth/kubernetes) to securely issue the operator a short-lived token according to your Vault policy. This token is then used to sync the updated certs to Vault so that they can be used by Vault-integrated applications and services.
+
 ## Configuration
 
 The operator uses Kubernetes annotations to define the sync locations and configurations.
@@ -58,6 +74,12 @@ metadata:
     cert-manager-sync.lestak.sh/acm-certificate-arn: "" # will be auto-filled by operator for in-place renewals
     cert-manager-sync.lestak.sh/incapsula-site-id: "12345" # incapsula site to attach cert
     cert-manager-sync.lestak.sh/incapsula-secret-name: "cert-manager-sync-poc" # secret in same namespace which contains incapsula api key
+    cert-manager-sync.lestak.sh/threatx-hostname: "example.com" # threatx hostname to attach cert
+    cert-manager-sync.lestak.sh/threatx-secret-name: "example-threatx-api-secret" # secret in same namespace which contains threatx api key
+    cert-manager-sync.lestak.sh/vault-addr: "https://vault.example.com" # HashiCorp Vault address
+    cert-manager-sync.lestak.sh/vault-role: "role-name" # HashiCorp Vault role name
+    cert-manager-sync.lestak.sh/vault-auth-method: "auth-method" # HashiCorp Vault auth method name
+    cert-manager-sync.lestak.sh/vault-path: "kv-name/path/to/secret" # HashiCorp Vault path to store cert
 data:
   ca.crt: ""
   tls.crt: ""

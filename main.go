@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/acm"
 	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -162,192 +160,12 @@ func getSecrets() ([]corev1.Secret, error) {
 	return slo, err
 }
 
-// ACMCerts accepts a slice of Secrets and returns only those configured
-// for replication to ACM
-func ACMCerts(s []corev1.Secret) []corev1.Secret {
-	var ac []corev1.Secret
-	for _, v := range s {
-		if v.Annotations[operatorName+"/acm-enabled"] == "true" && cacheChanged(v) {
-			ac = append(ac, v)
-		}
-	}
-	return ac
-}
-
-// IncapsulaCerts accepts a slice of Secrets and returns only those configured
-// for replication to Incapsula
-func IncapsulaCerts(s []corev1.Secret) []corev1.Secret {
-	var c []corev1.Secret
-	for _, v := range s {
-		if v.Annotations[operatorName+"/incapsula-site-id"] != "" && cacheChanged(v) {
-			c = append(c, v)
-		}
-	}
-	return c
-}
-
 // secretToCert converts a k8s secret to a properly-formatted TLS Certificate
 func secretToCert(s corev1.Secret) *Certificate {
 	c := separateCerts(s.ObjectMeta.Name, s.Data["ca.crt"], s.Data["tls.crt"], s.Data["tls.key"])
 	c.Annotations = s.Annotations
 	c.Labels = s.Labels
 	return c
-}
-
-// secretToACMInput converts a k8s secret to a properly-formatted ACM Import object
-func secretToACMInput(s corev1.Secret) (*acm.ImportCertificateInput, error) {
-	l := log.WithFields(
-		log.Fields{
-			"action":     "secretToACMInput",
-			"secretName": s.ObjectMeta.Name,
-		},
-	)
-	im := separateCertsACM(s.ObjectMeta.Name, s.Data["ca.crt"], s.Data["tls.crt"], s.Data["tls.key"])
-	// secret already has an aws acm cert attached
-	if s.ObjectMeta.Annotations[operatorName+"/acm-certificate-arn"] != "" {
-		im.CertificateArn = aws.String(s.ObjectMeta.Annotations[operatorName+"/acm-certificate-arn"])
-	} else {
-		// this is our first time sending to ACM, tag
-		var tags []*acm.Tag
-		tags = append(tags, &acm.Tag{
-			Key:   aws.String(operatorName + "/secret-name"),
-			Value: aws.String(s.ObjectMeta.Name),
-		})
-		im.Tags = tags
-	}
-	l.Print("secretToACMInput")
-	return im, nil
-}
-
-// replicateACMCert takes an ACM ImportCertificateInput and replicates it to AWS CertificateManager
-func replicateACMCert(ai *acm.ImportCertificateInput) (string, error) {
-	var arn string
-	l := log.WithFields(
-		log.Fields{
-			"action": "replicateACMCert",
-		},
-	)
-	l.Print("replicateACMCert")
-	// inefficient creation of session on each import - can be cached
-	sess, serr := CreateAWSSession()
-	if serr != nil {
-		l.Printf("CreateAWSSession error=%v", serr)
-		return arn, serr
-	}
-	c, cerr := ImportCertificate(sess, ai, "")
-	if cerr != nil {
-		l.Printf("ImportCertificate error=%v", cerr)
-		return arn, cerr
-	}
-	l.Printf("cert created arn=%v", c)
-	return c, nil
-}
-
-// handleACMCert handles the update of a single ACM Certificate
-func handleACMCert(s corev1.Secret) error {
-	l := log.WithFields(
-		log.Fields{
-			"action": "handleACMCert",
-			"name":   s.ObjectMeta.Name,
-		},
-	)
-	l.Print("handleACMCert")
-	ai, err := secretToACMInput(s)
-	if err != nil {
-		l.Print(err)
-		return err
-	}
-	certArn, cerr := replicateACMCert(ai)
-	if cerr != nil {
-		l.Print(cerr)
-		return cerr
-	}
-	s.ObjectMeta.Annotations[operatorName+"/acm-certificate-arn"] = certArn
-	l.Printf("certArn=%v", certArn)
-	sc := k8sClient.CoreV1().Secrets(os.Getenv("SECRETS_NAMESPACE"))
-	uo := metav1.UpdateOptions{}
-	_, uerr := sc.Update(
-		context.Background(),
-		&s,
-		uo,
-	)
-	if uerr != nil {
-		l.Print(uerr)
-		return uerr
-	}
-	return nil
-}
-
-// handleACMCerts handles the sync of all ACM-enabled certs
-func handleACMCerts(ss []corev1.Secret) {
-	ss = ACMCerts(ss)
-	l := log.WithFields(
-		log.Fields{
-			"action": "handleACMCerts",
-		},
-	)
-	l.Print("handleACMCerts")
-	for i, s := range ss {
-		l.Debugf("processing secret %s (%d/%d)", s.ObjectMeta.Name, i+1, len(ss))
-		err := handleACMCert(s)
-		if err != nil {
-			l.Printf("handleACMCert error=%v", err)
-			continue
-		}
-		c := secretToCert(s)
-		addToCache(c)
-	}
-}
-
-// handleIncapsulaCerts handles the sync of all Incapsula-enabled certs
-func handleIncapsulaCerts(ss []corev1.Secret) {
-	ss = IncapsulaCerts(ss)
-	l := log.WithFields(
-		log.Fields{
-			"action": "handleIncapsulaCerts",
-		},
-	)
-	l.Print("handleIncapsulaCerts")
-	for i, s := range ss {
-		l.Debugf("processing secret %s (%d/%d)", s.ObjectMeta.Name, i+1, len(ss))
-		is := &IncapsulaSecret{
-			Name: s.Annotations[operatorName+"/incapsula-secret-name"],
-		}
-		gerr := is.Get(context.Background())
-		if gerr != nil {
-			l.WithFields(log.Fields{
-				"siteID":     s.Annotations[operatorName+"/incapsula-site-id"],
-				"secretName": s.Annotations[operatorName+"/incapsula-secret-name"],
-			}).Printf("is.Get error=%v", gerr)
-			continue
-		}
-		// ensure site has ssl enabled befure uploading cert
-		_, serr := GetIncapsulaSiteStatus(
-			is,
-			s.Annotations[operatorName+"/incapsula-site-id"],
-		)
-		if serr != nil {
-			l.WithFields(log.Fields{
-				"siteID":     s.Annotations[operatorName+"/incapsula-site-id"],
-				"secretName": s.Annotations[operatorName+"/incapsula-secret-name"],
-			}).Printf("GetIncapsulaSiteStatus error=%v", serr)
-			continue
-		}
-		c := secretToCert(s)
-		uerr := UploadIncapsulaCert(
-			is,
-			c,
-			s.Annotations[operatorName+"/incapsula-site-id"],
-		)
-		if uerr != nil {
-			l.WithFields(log.Fields{
-				"siteID":     s.Annotations[operatorName+"/incapsula-site-id"],
-				"secretName": s.Annotations[operatorName+"/incapsula-secret-name"],
-			}).Printf("UploadIncapsulaCert error=%v", uerr)
-			continue
-		}
-		addToCache(c)
-	}
 }
 
 func init() {
@@ -392,8 +210,11 @@ func main() {
 		go handleACMCerts(as)
 		l.Debug("main handleIncapsulaCerts")
 		go handleIncapsulaCerts(as)
+		l.Debug("main handleThreatxCerts")
+		go handleThreatxCerts(as)
 		l.Printf("sleep main loop")
+		l.Debug("main handleVaultCerts")
+		go handleVaultCerts(as)
 		time.Sleep(time.Second * 60)
 	}
-
 }
