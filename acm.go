@@ -5,30 +5,41 @@ import (
 	"os"
 	"strings"
 
+	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/acm"
 )
 
 // CreateAWSSession will connect to AWS with the account's credentials from vault
-func CreateAWSSession() (*session.Session, error) {
+func CreateAWSSession(roleArn string) (*session.Session, *aws.Config, error) {
 	l := log.WithFields(
 		log.Fields{
 			"action": "CreateAWSSession",
 		},
 	)
 	l.Print("CreateAWSSession")
-	sess, err := session.NewSession(&aws.Config{
-		Region: aws.String(os.Getenv("AWS_REGION"))},
-	)
+	cfg := &aws.Config{
+		Region: aws.String(os.Getenv("AWS_REGION")),
+	}
+	sess, err := session.NewSession(cfg)
+	reqId := uuid.New().String()
+	if roleArn != "" {
+		l.Printf("CreateAWSSession roleArn=%s requestId=%s", roleArn, reqId)
+		creds := stscreds.NewCredentials(sess, roleArn, func(p *stscreds.AssumeRoleProvider) {
+			p.RoleSessionName = "cert-manager-sync-" + reqId
+		})
+		cfg.Credentials = creds
+	}
 	if err != nil {
 		l.Printf("%+v", err)
 	}
-	return sess, nil
+	return sess, cfg, nil
 }
 
 // separateCerts ensures that certificates are configured appropriately
@@ -58,14 +69,14 @@ func separateCertsACM(name string, ca, crt, key []byte) *acm.ImportCertificateIn
 }
 
 // ImportCertificate imports a cert into ACM
-func ImportCertificate(s *session.Session, im *acm.ImportCertificateInput, arn string) (string, error) {
+func ImportCertificate(s *session.Session, cfg *aws.Config, im *acm.ImportCertificateInput, arn string) (string, error) {
 	l := log.WithFields(
 		log.Fields{
 			"action": "ImportCertificate",
 		},
 	)
 	l.Print("ImportCertificate")
-	svc := acm.New(s)
+	svc := acm.New(s, cfg)
 	if arn != "" {
 		im.CertificateArn = &arn
 	}
@@ -136,7 +147,7 @@ func secretToACMInput(s corev1.Secret) (*acm.ImportCertificateInput, error) {
 }
 
 // replicateACMCert takes an ACM ImportCertificateInput and replicates it to AWS CertificateManager
-func replicateACMCert(ai *acm.ImportCertificateInput) (string, error) {
+func replicateACMCert(ai *acm.ImportCertificateInput, roleArn string) (string, error) {
 	var arn string
 	l := log.WithFields(
 		log.Fields{
@@ -145,12 +156,12 @@ func replicateACMCert(ai *acm.ImportCertificateInput) (string, error) {
 	)
 	l.Print("replicateACMCert")
 	// inefficient creation of session on each import - can be cached
-	sess, serr := CreateAWSSession()
+	sess, cfg, serr := CreateAWSSession(roleArn)
 	if serr != nil {
 		l.Printf("CreateAWSSession error=%v", serr)
 		return arn, serr
 	}
-	c, cerr := ImportCertificate(sess, ai, "")
+	c, cerr := ImportCertificate(sess, cfg, ai, "")
 	if cerr != nil {
 		l.Printf("ImportCertificate error=%v", cerr)
 		return arn, cerr
@@ -173,7 +184,8 @@ func handleACMCert(s corev1.Secret) error {
 		l.Print(err)
 		return err
 	}
-	certArn, cerr := replicateACMCert(ai)
+	roleArn := s.ObjectMeta.Annotations[operatorName+"/acm-role-arn"]
+	certArn, cerr := replicateACMCert(ai, roleArn)
 	if cerr != nil {
 		l.Print(cerr)
 		return cerr
@@ -193,3 +205,4 @@ func handleACMCert(s corev1.Secret) error {
 	}
 	return nil
 }
+
