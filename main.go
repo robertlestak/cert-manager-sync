@@ -110,10 +110,14 @@ func cacheChanged(s corev1.Secret) bool {
 		return true
 	}
 	l.Printf("cache length: %d", len(cache))
+	var found bool
 	for _, v := range cache {
 		l.Debugf("checking cache for secret %s", v.SecretName)
 		tc := secretToCert(s)
 		nameMatch := v.SecretName == s.ObjectMeta.Name
+		if nameMatch {
+			found = true
+		}
 		certChanged := string(v.Certificate) != string(tc.Certificate)
 		labelsChanged := stringMapChanged(v.Labels, tc.Labels)
 		annotationsChanged := stringMapChanged(v.Annotations, tc.Annotations)
@@ -122,6 +126,10 @@ func cacheChanged(s corev1.Secret) bool {
 			l.Printf("cache changed: %s", s.ObjectMeta.Name)
 			return true
 		}
+	}
+	if !found {
+		l.Printf("cache changed: %s", s.ObjectMeta.Name)
+		return true
 	}
 	l.Print("cache not changed")
 	return false
