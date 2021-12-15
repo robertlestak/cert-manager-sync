@@ -1,0 +1,66 @@
+# Default values for cert-manager-sync.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+incapsula:
+  enabled: false
+  api: "https://my.imperva.com/api/prov/v1"
+
+secretsNamespace: "monitor"
+
+aws:
+  enabled: true
+  region: "eu-west-1"
+
+replicaCount: 1
+
+image:
+  repository: sbkg0002/cert-manager-sync
+  tag: "20211212"
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+
+imagePullSecrets: []
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: 
+    eks.amazonaws.com/role-arn: "arn:aws:iam::11111111111:role/cert-manager-sync"
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: "cert-manager-sync"
+
+podAnnotations: {}
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+resources: 
+  limits:
+    cpu: 500m
+    memory: 500Mi
+  requests:
+    cpu: 500m
+    memory: 500Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 100
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
