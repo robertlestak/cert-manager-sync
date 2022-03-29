@@ -1,3 +1,5 @@
+<img src="./devops/docs/logo.png" style="width:150px">
+
 # cert-manager-sync
 
 Enable Kubernetes `cert-manager` to sync TLS certificates to AWS ACM, HashiCorp Vault, Incapsula, and ThreatX.
