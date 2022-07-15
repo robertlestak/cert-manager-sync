@@ -73,7 +73,8 @@ metadata:
   annotations:
     cert-manager-sync.lestak.sh/sync-enabled: "true" # enable sync on tls secret
     cert-manager-sync.lestak.sh/acm-enabled: "true" # sync certificate to ACM
-    cert-manager-sync.devops.umgapps.com/acm-role-arn: "" # Role ARN to assume if set
+    cert-manager-sync.lestak.sh/acm-role-arn: "" # Role ARN to assume if set
+    cert-manager-sync.lestak.sh/acm-region: "" # Region to use. If not set, will use AWS_REGION env var, or us-east-1 if not set
     cert-manager-sync.lestak.sh/acm-certificate-arn: "" # will be auto-filled by operator for in-place renewals
     cert-manager-sync.lestak.sh/incapsula-site-id: "12345" # incapsula site to attach cert
     cert-manager-sync.lestak.sh/incapsula-secret-name: "cert-manager-sync-poc" # secret in same namespace which contains incapsula api key

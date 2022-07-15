@@ -17,15 +17,21 @@ import (
 )
 
 // CreateAWSSession will connect to AWS with the account's credentials from vault
-func CreateAWSSession(roleArn string) (*session.Session, *aws.Config, error) {
+func CreateAWSSession(roleArn string, region string) (*session.Session, *aws.Config, error) {
 	l := log.WithFields(
 		log.Fields{
 			"action": "CreateAWSSession",
 		},
 	)
 	l.Print("CreateAWSSession")
+	if region == "" {
+		region = os.Getenv("AWS_REGION")
+	}
+	if region == "" {
+		region = "us-east-1"
+	}
 	cfg := &aws.Config{
-		Region: aws.String(os.Getenv("AWS_REGION")),
+		Region: aws.String(region),
 	}
 	sess, err := session.NewSession(cfg)
 	reqId := uuid.New().String()
@@ -147,7 +153,7 @@ func secretToACMInput(s corev1.Secret) (*acm.ImportCertificateInput, error) {
 }
 
 // replicateACMCert takes an ACM ImportCertificateInput and replicates it to AWS CertificateManager
-func replicateACMCert(ai *acm.ImportCertificateInput, roleArn string) (string, error) {
+func replicateACMCert(ai *acm.ImportCertificateInput, roleArn string, region string) (string, error) {
 	var arn string
 	l := log.WithFields(
 		log.Fields{
@@ -156,7 +162,7 @@ func replicateACMCert(ai *acm.ImportCertificateInput, roleArn string) (string, e
 	)
 	l.Print("replicateACMCert")
 	// inefficient creation of session on each import - can be cached
-	sess, cfg, serr := CreateAWSSession(roleArn)
+	sess, cfg, serr := CreateAWSSession(roleArn, region)
 	if serr != nil {
 		l.Printf("CreateAWSSession error=%v", serr)
 		return arn, serr
@@ -185,7 +191,8 @@ func handleACMCert(s corev1.Secret) error {
 		return err
 	}
 	roleArn := s.ObjectMeta.Annotations[operatorName+"/acm-role-arn"]
-	certArn, cerr := replicateACMCert(ai, roleArn)
+	region := s.ObjectMeta.Annotations[operatorName+"/acm-region"]
+	certArn, cerr := replicateACMCert(ai, roleArn, region)
 	if cerr != nil {
 		l.Print(cerr)
 		return cerr
@@ -205,4 +212,3 @@ func handleACMCert(s corev1.Secret) error {
 	}
 	return nil
 }
-
