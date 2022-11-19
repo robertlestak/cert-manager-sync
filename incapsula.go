@@ -190,7 +190,7 @@ func handleIncapsulaCerts(ss []corev1.Secret) {
 			}).Printf("GetIncapsulaSiteStatus error=%v", serr)
 			continue
 		}
-		c := secretToCert(s)
+		c := k8sTLSSecretToTextCert(s)
 		uerr := UploadIncapsulaCert(
 			is,
 			c,

@@ -164,9 +164,9 @@ func handleVaultCerts(ss []corev1.Secret) {
 			Role:       s.Annotations[operatorName+"/vault-role"],
 			AuthMethod: s.Annotations[operatorName+"/vault-auth-method"],
 		}
-		c := secretToCert(s)
+		c := k8sTLSSecretToTextCert(s)
 		if c == nil {
-			l.Errorf("secretToCert(%s) error: cert required", s.ObjectMeta.Name)
+			l.Errorf("k8sTLSSecretToTextCert(%s) error: cert required", s.ObjectMeta.Name)
 			continue
 		}
 		_, cerr := vs.NewClient()

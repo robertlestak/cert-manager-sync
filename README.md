@@ -71,11 +71,30 @@ metadata:
   name: example
   namespace: cert-manager
   annotations:
-    cert-manager-sync.lestak.sh/sync-enabled: "true" # enable sync on tls secret
-    cert-manager-sync.lestak.sh/acm-enabled: "true" # sync certificate to ACM
-    cert-manager-sync.lestak.sh/acm-role-arn: "" # Role ARN to assume if set
-    cert-manager-sync.lestak.sh/acm-region: "" # Region to use. If not set, will use AWS_REGION env var, or us-east-1 if not set
-    cert-manager-sync.lestak.sh/acm-certificate-arn: "" # will be auto-filled by operator for in-place renewals
+    # enable sync on tls secret
+    cert-manager-sync.lestak.sh/sync-enabled: "true"
+    # Role ARN to assume if set
+    cert-manager-sync.lestak.sh/assume-role-arn: ""
+    # Region to use. If not set, will use AWS_REGION env var, or us-east-1 if not set
+    cert-manager-sync.lestak.sh/aws-region: ""
+    
+    # ACM
+    # sync certificate to ACM
+    cert-manager-sync.lestak.sh/acm-enabled: "true" 
+    # will be auto-filled by operator for in-place renewals
+    cert-manager-sync.lestak.sh/acm-certificate-arn: ""
+    
+    # Secrets Manager
+    # sync certificate to Secrets Manager
+    cert-manager-sync.lestak.sh/asm-enabled: "true"
+    # the name of secret assigned in secretsmanager. This cannot be empty.
+    cert-manager-sync.lestak.sh/asm-name: ""
+    # the description of secret assigned in secretsmanager. This can be empty.
+    cert-manager-sync.lestak.sh/asm-description: ""
+    # if a secretsmanager name (above) already exists, this will auto-filled
+    cert-manager-sync.lestak.sh/asm-secret-arn: ""
+    
+    # other supported things
     cert-manager-sync.lestak.sh/incapsula-site-id: "12345" # incapsula site to attach cert
     cert-manager-sync.lestak.sh/incapsula-secret-name: "cert-manager-sync-poc" # secret in same namespace which contains incapsula api key
     cert-manager-sync.lestak.sh/threatx-hostname: "example.com" # threatx hostname to attach cert

@@ -326,7 +326,7 @@ func handleThreatxCerts(ss []corev1.Secret) {
 			continue
 		}
 		l.Debugf("updating site %s", s.Annotations[operatorName+"/threatx-hostname"])
-		c := secretToCert(s)
+		c := k8sTLSSecretToTextCert(s)
 		// https://support.threatx.com/hc/en-us/articles/360000661851-API-Reference-Guide-1-34-0#Actortags:-delete
 		txs.SslBlob = string(c.Certificate) + string(c.Chain) + string(c.Key)
 		txs.SslEnabled = true
