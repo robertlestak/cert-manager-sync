@@ -6,3 +6,5 @@ metadata:
   namespace: cert-manager
   annotations:
     eks.amazonaws.com/role-arn: ""
+imagePullSecrets:
+  - name: regcred

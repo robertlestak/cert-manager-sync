@@ -2,7 +2,29 @@
 
 # cert-manager-sync
 
-Enable Kubernetes `cert-manager` to sync TLS certificates to AWS ACM, HashiCorp Vault, Incapsula, and ThreatX.
+Enable Kubernetes `cert-manager` to sync TLS certificates to AWS ASM, ACM, HashiCorp Vault, Incapsula, and ThreatX.
+
+## The Bluescape Use-case
+
+This operator has been refactored to allow storage of TLS certificates to AWS Secrets Manager. This was necessary because
+ACM validates the integrity of the certificates stored there. If a private key does not belong to a public certificate 
+then ACM will not store the secret key. We need to automatically store keys in the Fedramp environment for StackArmor
+to pull and use within the Palo Alto FW for stateful inspection to function properly.
+
+When I tested this application originally, I could not get the private key to store (either via this application or
+manually) and so instead of writing something from scratch, I refactored this operator.
+
+### But what about?
+
+This operator is not feature rich. The bits I refactored are written specifically to store TLS certificates. It does not
+store general secrets automatically, though, I assume it wouldn't take too much to get that to work if we needed that
+functionality.
+
+### ASM or ACM
+
+I refactored this operator in such a way that certificates can be stored in both ACM and ASM simultaneously. This means
+that if the annotation is set such that both `asm-enabled` and `acm-enabled` are both set to `true` then this operator
+will attempt to store the secrets in both places.
 
 ## Architecture
 
@@ -14,7 +36,7 @@ In containerized environments, we use `cert-manager` to automatically provision,
 
 These certificates are managed entirely through code using git ops, and developers / operators never need to touch / see the actual plain-text certificate as it is automatically provisioned and attached to gateway.
 
-However for applications that sit behind the Incapsula WAF, or have components in both EKS and CloudFront, there was not a seamless and secure process to attach certificates without operators manually passing DNS01 challenge records back and forth or worse, passing TLS certs back and forth. 
+However, for applications that sit behind the Incapsula WAF, or have components in both EKS and CloudFront, there was not a seamless and secure process to attach certificates without operators manually passing DNS01 challenge records back and forth or worse, passing TLS certs back and forth. 
 
 In addition to the security risk this poses, it also introduces a level of human error and manual tracking of expiry / renewals.
 
@@ -108,6 +130,10 @@ data:
   tls.crt: ""
   tls.key: ""
 ```
+
+## Building
+
+
 
 ## Deployment
 
