@@ -53,7 +53,7 @@ func separateCerts(name string, ca, crt, key []byte) *Certificate {
 	b := "-----BEGIN CERTIFICATE-----\n"
 	str := strings.Split(string(crt), b)
 	nc := b + str[1]
-	ch := strings.Join(str[:len(str)-1], b)
+	ch := b + strings.Join(str[2:len(str)], b)
 	cert := &Certificate{
 		SecretName:  name,
 		Chain:       []byte(ch),
