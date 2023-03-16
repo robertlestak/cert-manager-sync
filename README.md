@@ -24,6 +24,20 @@ When the certificate is provisioned by `cert-manager`, the `cert-manager-sync` o
 
 ## Authentication
 
+### Google Cloud
+
+Create a service account with `roles/certificatemanager.editor` rolem and attach the service account to the k8s Service Account in `devops/k8s/sa.yaml`.
+```yaml
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cert-manager-sync
+  namespace: cert-manager
+  annotations:
+    iam.gke.io/gcp-service-account: GSA_NAME@PROJECT_ID.iam.gserviceaccount.com
+```
+
 ### AWS ACM
 
 Create an IRSA role with `acm:*` access, and attach the IAM Role to the k8s ServiceAccount in `devops/k8s/sa.yaml`.
@@ -72,6 +86,9 @@ metadata:
   namespace: cert-manager
   annotations:
     cert-manager-sync.lestak.sh/sync-enabled: "true" # enable sync on tls secret
+    cert-manager-sync.lestak.sh/GCP-enabled: "true"
+    cert-manager-sync.lestak.sh/GCP-location: LOCATION
+    cert-manager-sync.lestak.sh/GCP-project: PROJECT_ID
     cert-manager-sync.lestak.sh/acm-enabled: "true" # sync certificate to ACM
     cert-manager-sync.lestak.sh/acm-role-arn: "" # Role ARN to assume if set
     cert-manager-sync.lestak.sh/acm-region: "" # Region to use. If not set, will use AWS_REGION env var, or us-east-1 if not set
@@ -94,7 +111,8 @@ data:
 
 Create `regcred` registry credential secret in `cert-manager` namespace.
 
-```bash
+If you want to store the certs in different namespaces, modify `SECRETS_NAMESPACE` var in the [deployment file](devops/k8s/deploy.yaml)
 
+```bash
 kubectl apply -f devops/k8s
 ```
