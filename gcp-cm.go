@@ -72,11 +72,11 @@ func secretToGCPCert(s corev1.Secret, project string, location string, gcp_cert_
 
 
 	if gcp_cert_name =="" {
-		gcp_cert_name = s.ObjectMeta.Namespace+"-" + s.ObjectMeta.Name
+		gcp_cert_name = "projects/"+project+"/locations/" + location + "certificates/" + s.ObjectMeta.Namespace+"-" + s.ObjectMeta.Name
 	}
 
 	return &certificatemanagerpb.Certificate{
-			Name: "projects/"+project+"/locations/" + location + "certificates/" + gcp_cert_name,
+			Name: gcp_cert_name,
 			Type: &certificatemanagerpb.Certificate_SelfManaged{SelfManaged: sm_cert},}, nil
 
 
@@ -150,19 +150,19 @@ func handleGCPCert(s corev1.Secret, c *certificatemanager.Client, ctx context.Co
 			req := &certificatemanagerpb.UpdateCertificateRequest{
 				Certificate: ai,
 				UpdateMask: &field_mask.FieldMask{
-					Paths: []string{"type"},
+					Paths: []string{"self_managed"},
 				},
 			}
 			op, err := c.UpdateCertificate(ctx,req)
 			if err != nil {
 				// TODO: Handle error.
-				l.Errorf("cannot create cert because of %s",err)
+				l.Errorf("cannot update cert because of %s",err)
 				return err
 			}
 			resp, err := op.Wait(ctx)
 			if err != nil {
 				// TODO: Handle error.
-				l.Errorf("cannot complete creating cert because of %s",err)
+				l.Errorf("cannot complete updating cert because of %s",err)
 				return err
 			}
 			l.Print(resp)
