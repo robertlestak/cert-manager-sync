@@ -5,4 +5,4 @@ metadata:
   name: cert-manager-sync
   namespace: cert-manager
   annotations:
-    eks.amazonaws.com/role-arn: ""
+    iam.gke.io/gcp-service-account: GSA_NAME@PROJECT_ID.iam.gserviceaccount.com

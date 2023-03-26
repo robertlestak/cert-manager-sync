@@ -214,6 +214,8 @@ func main() {
 		if serr != nil {
 			l.Fatal(serr)
 		}
+		l.Debug("main handleGCPCerts")
+		go handleGCPCerts(as)
 		l.Debug("main handleACMCerts")
 		go handleACMCerts(as)
 		l.Debug("main handleIncapsulaCerts")
