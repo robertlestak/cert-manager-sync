@@ -26,6 +26,10 @@ spec:
         - image: registry.example.com/devops/cert-manager-sync:v0.0.1
           name: cert-manager-sync
           env:
+            - name: CERT_SYNC_GCP_CERT
+              value: true
+            - name: CERT_SYNC_S3 # <CERT_SYNC_ACM/CERT_SYNC_IMPERVA/CERT_SYNC_THREATX/CERT_SYNC_VAULT>
+              value: true
             - name: INCAPSULA_API
               value: "https://my.imperva.com/api/prov/v1"
             - name: SECRETS_NAMESPACE

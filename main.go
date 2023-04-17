@@ -214,17 +214,30 @@ func main() {
 		if serr != nil {
 			l.Fatal(serr)
 		}
-		l.Debug("main handleGCPCerts")
-		go handleGCPCerts(as)
-		l.Debug("main handleACMCerts")
-		go handleACMCerts(as)
-		l.Debug("main handleIncapsulaCerts")
-		go handleIncapsulaCerts(as)
-		l.Debug("main handleThreatxCerts")
-		go handleThreatxCerts(as)
-		l.Printf("sleep main loop")
-		l.Debug("main handleVaultCerts")
-		go handleVaultCerts(as)
+		if os.Getenv("CERT_SYNC_GCP_CERT") == "true" {
+			l.Debug("main handleGCPCerts")
+			go handleGCPCerts(as)
+		}
+		if os.Getenv("CERT_SYNC_S3") == "true" {
+			l.Debug("main handleS3Certs")
+			go handleS3Certs(as)
+		}
+		if os.Getenv("CERT_SYNC_ACM") == "true" {
+			l.Debug("main handleACMCerts")
+			go handleACMCerts(as)
+		}
+		if os.Getenv("CERT_SYNC_IMPERVA") == "true" {
+			l.Debug("main handleIncapsulaCerts")
+			go handleIncapsulaCerts(as)
+		}
+		if os.Getenv("CERT_SYNC_THREATX") == "true" {
+			l.Debug("main handleThreatxCerts")
+			go handleThreatxCerts(as)
+		}
+		if os.Getenv("CERT_SYNC_VAULT") == "true" {
+			l.Debug("main handleVaultCerts")
+			go handleVaultCerts(as)
+		}
 		time.Sleep(time.Second * 60)
 	}
 }

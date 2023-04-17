@@ -2,7 +2,7 @@
 
 # cert-manager-sync
 
-Enable Kubernetes `cert-manager` to sync TLS certificates to AWS ACM, HashiCorp Vault, Incapsula, and ThreatX.
+Enable Kubernetes `cert-manager` to sync TLS certificates to AWS ACM & S3, HashiCorp Vault, Incapsula, and ThreatX.
 
 ## Architecture
 
@@ -38,7 +38,7 @@ metadata:
     iam.gke.io/gcp-service-account: GSA_NAME@PROJECT_ID.iam.gserviceaccount.com
 ```
 
-### AWS ACM
+### AWS ACM & AWS S3
 
 Create an IRSA role with `acm:*` access, and attach the IAM Role to the k8s ServiceAccount in `devops/k8s/sa.yaml`.
 
@@ -86,6 +86,12 @@ metadata:
   namespace: cert-manager
   annotations:
     cert-manager-sync.lestak.sh/sync-enabled: "true" # enable sync on tls secret
+
+    cert-manager-sync.lestak.sh/s3-enabled: "true" # enable cert to AWS S3
+    # tls.crt, tls.key, ca.crt is stored s3://cert-manager-sync/cert-manager/example/
+    cert-manager-sync.lestak.sh/s3-bucket: "cert-manager-sync"
+    cert-manager-sync.lestak.sh/s3-role-arn: ""  # Role ARN to assume if set
+    cert-manager-sync.lestak.sh/s3-role-region: "" # Region to use. If not set, will use AWS_REGION env var, or us-east-1 if not set
     cert-manager-sync.lestak.sh/GCP-enabled: "true"
     cert-manager-sync.lestak.sh/GCP-location: LOCATION
     cert-manager-sync.lestak.sh/GCP-project: PROJECT_ID
@@ -115,4 +121,10 @@ If you want to store the certs in different namespaces, modify `SECRETS_NAMESPAC
 
 ```bash
 kubectl apply -f devops/k8s
+```
+
+## Development
+```bash
+go build -o certsync *.go
+./certsync
 ```
