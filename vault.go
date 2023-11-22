@@ -14,6 +14,7 @@ import (
 
 type VaultSecret struct {
 	Addr       string
+	Namespace  string
 	Role       string
 	AuthMethod string
 	Path       string
@@ -37,6 +38,10 @@ func (s *VaultSecret) NewClient() (*api.Client, error) {
 	if err != nil {
 		l.Printf("vault.NewClient error: %v\n", err)
 		return s.Client, err
+	}
+	if s.Namespace != "" {
+		l.Printf("vault.NewClient using namespace %s", s.Namespace)
+		s.Client.SetNamespace(s.Namespace)
 	}
 	if os.Getenv("KUBE_TOKEN") != "" {
 		l.Printf("vault.NewClient using KUBE_TOKEN")
@@ -160,6 +165,7 @@ func handleVaultCerts(ss []corev1.Secret) {
 		l.Debugf("processing secret %s (%d/%d)", s.ObjectMeta.Name, i+1, len(ss))
 		vs := VaultSecret{
 			Addr:       s.Annotations[operatorName+"/vault-addr"],
+			Namespace:  s.Annotations[operatorName+"/vault-namespace"],
 			Path:       s.Annotations[operatorName+"/vault-path"],
 			Role:       s.Annotations[operatorName+"/vault-role"],
 			AuthMethod: s.Annotations[operatorName+"/vault-auth-method"],
