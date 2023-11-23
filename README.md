@@ -22,7 +22,20 @@ This operator fully automates this process, so that developers must only annotat
 
 When the certificate is provisioned by `cert-manager`, the `cert-manager-sync` operator will sync the certificate to the upstream certificate provider(s) defined in the TLS secret annotations.
 
-## Authentication
+## Certificate Stores
+
+### AWS ACM
+
+Create an IRSA role with `acm:*` access, and attach the IAM Role to the k8s ServiceAccount in `devops/k8s/sa.yaml`.
+
+Annotations:
+
+```yaml
+    cert-manager-sync.lestak.sh/acm-enabled: "true" # sync certificate to ACM
+    cert-manager-sync.lestak.sh/acm-role-arn: "" # Role ARN to assume if set
+    cert-manager-sync.lestak.sh/acm-region: "" # Region to use. If not set, will use AWS_REGION env var, or us-east-1 if not set
+    cert-manager-sync.lestak.sh/acm-certificate-arn: "" # will be auto-filled by operator for in-place renewals
+```
 
 ### Google Cloud
 
@@ -38,9 +51,13 @@ metadata:
     iam.gke.io/gcp-service-account: GSA_NAME@PROJECT_ID.iam.gserviceaccount.com
 ```
 
-### AWS ACM
+Annotations:
 
-Create an IRSA role with `acm:*` access, and attach the IAM Role to the k8s ServiceAccount in `devops/k8s/sa.yaml`.
+```yaml
+    cert-manager-sync.lestak.sh/gcp-enabled: "true" # sync certificate to GCP
+    cert-manager-sync.lestak.sh/gcp-location: LOCATION # GCP location to store cert
+    cert-manager-sync.lestak.sh/gcp-project: PROJECT_ID # GCP project to store cert
+```
 
 ### Incapsula
 
@@ -54,6 +71,13 @@ kubectl -n cert-manager \
 
 You will then annotate your k8s TLS secret with this secret name to tell the operator to retrieve the Incapsula API secret from this location.
 
+Annotations:
+
+```yaml
+    cert-manager-sync.lestak.sh/incapsula-site-id: "12345" # incapsula site to attach cert
+    cert-manager-sync.lestak.sh/incapsula-secret-name: "cert-manager-sync-poc" # secret in same namespace which contains the incapsula api key. If provided in format "namespace/secret-name", will look in that namespace for the secret
+```
+
 ### ThreatX
 
 Create a ThreatX API Key and create a kube secret in the namespace in which the operator runs.
@@ -66,9 +90,27 @@ kubectl -n cert-manager \
 
 You will then annotate your k8s TLS secret with this secret name to tell the operator to retrieve the ThreatX API secret from this location.
 
+Annotations:
+
+```yaml
+    cert-manager-sync.lestak.sh/threatx-hostname: "example.com" # threatx hostname to attach cert
+    cert-manager-sync.lestak.sh/threatx-secret-name: "example-threatx-api-secret" # secret in same namespace which contains the threatx api key. If provided in format "namespace/secret-name", will look in that namespace for the secret
+```
+
 ### HashiCorp Vault
 
 HashiCorp Vault relies on the [Kubernetes Auth Method](https://www.vaultproject.io/docs/auth/kubernetes) to securely issue the operator a short-lived token according to your Vault policy. This token is then used to sync the updated certs to Vault so that they can be used by Vault-integrated applications and services.
+
+Annotations:
+
+```yaml
+    cert-manager-sync.lestak.sh/vault-addr: "https://vault.example.com" # HashiCorp Vault address
+    cert-manager-sync.lestak.sh/vault-namespace: "my-ns/example" # HashiCorp Vault address
+    cert-manager-sync.lestak.sh/vault-role: "role-name" # HashiCorp Vault role name
+    cert-manager-sync.lestak.sh/vault-auth-method: "auth-method" # HashiCorp Vault auth method name
+    cert-manager-sync.lestak.sh/vault-path: "kv-name/path/to/secret" # HashiCorp Vault path to store cert
+
+```
 
 ## Configuration
 
@@ -86,13 +128,13 @@ metadata:
   namespace: cert-manager
   annotations:
     cert-manager-sync.lestak.sh/sync-enabled: "true" # enable sync on tls secret
-    cert-manager-sync.lestak.sh/GCP-enabled: "true"
-    cert-manager-sync.lestak.sh/GCP-location: LOCATION
-    cert-manager-sync.lestak.sh/GCP-project: PROJECT_ID
     cert-manager-sync.lestak.sh/acm-enabled: "true" # sync certificate to ACM
     cert-manager-sync.lestak.sh/acm-role-arn: "" # Role ARN to assume if set
     cert-manager-sync.lestak.sh/acm-region: "" # Region to use. If not set, will use AWS_REGION env var, or us-east-1 if not set
     cert-manager-sync.lestak.sh/acm-certificate-arn: "" # will be auto-filled by operator for in-place renewals
+    cert-manager-sync.lestak.sh/gcp-enabled: "true" # sync certificate to GCP
+    cert-manager-sync.lestak.sh/gcp-location: LOCATION # GCP location to store cert
+    cert-manager-sync.lestak.sh/gcp-project: PROJECT_ID # GCP project to store cert
     cert-manager-sync.lestak.sh/incapsula-site-id: "12345" # incapsula site to attach cert
     cert-manager-sync.lestak.sh/incapsula-secret-name: "cert-manager-sync-poc" # secret in same namespace which contains incapsula api key
     cert-manager-sync.lestak.sh/threatx-hostname: "example.com" # threatx hostname to attach cert
@@ -112,7 +154,7 @@ data:
 
 Create `regcred` registry credential secret in `cert-manager` namespace.
 
-If you want to store the certs in different namespaces, modify `SECRETS_NAMESPACE` var in the [deployment file](devops/k8s/deploy.yaml)
+If you want to store the certs in different namespaces, modify `SECRETS_NAMESPACE` var in the [deployment file](devops/k8s/deploy.yaml). If this value is not set, all namespaces will be watched.
 
 ```bash
 kubectl apply -f devops/k8s

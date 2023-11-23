@@ -1,25 +1,29 @@
-package main
+package threatx
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"os"
+	"strings"
 
+	"github.com/robertlestak/cert-manager-sync/pkg/state"
+	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
 	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// ThreatXSecret contains a single Incapsula API Secret
-type ThreatXSecret struct {
-	Name         string `json:"name"`
-	APIToken     string `json:"api_token"`
-	CustomerName string `json:"customer_name"`
-	AuthToken    string `json:"auth_token"`
+type ThreatXStore struct {
+	SecretName      string
+	SecretNamespace string
+	APIToken        string `json:"api_token"`
+	CustomerName    string `json:"customer_name"`
+	AuthToken       string `json:"auth_token"`
+	Hostname        string `json:"hostname"`
 }
 
 type ThreatXSite struct {
@@ -64,16 +68,14 @@ type ThreatXGetRequest struct {
 	Name         string `json:"name"`
 }
 
-// Get retrieves a single Incapsula secret by name from k8s secrets
-func (s *ThreatXSecret) Get(ctx context.Context) error {
+func (s *ThreatXStore) GetAPIKey(ctx context.Context) error {
 	l := log.WithFields(log.Fields{
-		"func":    "ThreatXSecret.Get",
-		"name":    s.Name,
+		"func":    "ThreatXStore.GetAPIKey",
 		"context": ctx,
 	})
 	l.Info("start")
 	gopt := metav1.GetOptions{}
-	sc, err := k8sClient.CoreV1().Secrets(os.Getenv("SECRETS_NAMESPACE")).Get(ctx, s.Name, gopt)
+	sc, err := state.KubeClient.CoreV1().Secrets(s.SecretNamespace).Get(ctx, s.SecretName, gopt)
 	if err != nil {
 		return err
 	}
@@ -84,7 +86,7 @@ func (s *ThreatXSecret) Get(ctx context.Context) error {
 }
 
 // ThreatxLogin retrieves the api token from k8s secret and then generates a short-term token against ThreatX API
-func (s *ThreatXSecret) ThreatxLogin(ctx context.Context) error {
+func (s *ThreatXStore) ThreatxLogin(ctx context.Context) error {
 	l := log.WithFields(log.Fields{
 		"action": "ThreatxLogin",
 	})
@@ -96,11 +98,6 @@ func (s *ThreatXSecret) ThreatxLogin(ctx context.Context) error {
 		Token    string `json:"token"`
 	}
 	r.Command = "login"
-	gerr := s.Get(ctx)
-	if gerr != nil {
-		l.Error(gerr)
-		return gerr
-	}
 	r.APIToken = s.APIToken
 	jd, jerr := json.Marshal(r)
 	if jerr != nil {
@@ -124,7 +121,7 @@ func (s *ThreatXSecret) ThreatxLogin(ctx context.Context) error {
 		l.Error(err)
 		return err
 	}
-	bd, berr := ioutil.ReadAll(resp.Body)
+	bd, berr := io.ReadAll(resp.Body)
 	if berr != nil {
 		l.Error(berr)
 		return berr
@@ -148,73 +145,73 @@ func (s *ThreatXSecret) ThreatxLogin(ctx context.Context) error {
 }
 
 // Get retrieves a single ThreatX site from the API
-func (tx *ThreatXSite) Get(ctx context.Context, sec *ThreatXSecret) error {
+func (s *ThreatXStore) GetSite(ctx context.Context) (ThreatXSite, error) {
 	l := log.WithFields(log.Fields{
-		"func": "ThreatXSite.Get",
+		"func": "ThreatXStore.GetSite",
 	})
-	l.Info("start")
+	l.Debug("start")
 	var e error
-	if sec.AuthToken == "" {
+	var tx ThreatXSite
+	if s.AuthToken == "" {
 		l.Error("auth_token is empty")
-		return errors.New("auth_token is empty")
+		return tx, errors.New("auth_token is empty")
 	}
 	tgr := ThreatXGetRequest{
 		Command:      "get",
-		Token:        sec.AuthToken,
-		CustomerName: sec.CustomerName,
-		Name:         tx.Hostname,
+		Token:        s.AuthToken,
+		CustomerName: s.CustomerName,
+		Name:         s.Hostname,
 	}
 	jd, jerr := json.Marshal(tgr)
 	if jerr != nil {
 		l.Error(jerr)
-		return jerr
+		return tx, jerr
 	}
 	l.Debugf("request=%s", string(jd))
 	c := &http.Client{}
 	req, err := http.NewRequest("POST", os.Getenv("THREATX_API")+"/v2/sites", bytes.NewBuffer(jd))
 	if err != nil {
 		l.Error(err)
-		return err
+		return tx, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	resp, err := c.Do(req)
 	if err != nil {
 		l.Error(err)
-		return err
+		return tx, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		l.Error(err)
-		return err
+		return tx, err
 	}
 	type Resp struct {
 		Ok ThreatXSite `json:"Ok"`
 	}
 	var rr Resp
-	bd, berr := ioutil.ReadAll(resp.Body)
+	bd, berr := io.ReadAll(resp.Body)
 	if berr != nil {
 		l.Error(berr)
-		return berr
+		return tx, berr
 	}
 	l.Debugf("response=%s", string(bd))
 	jerr = json.Unmarshal(bd, &rr)
 	if jerr != nil {
 		l.Error(jerr)
-		return jerr
+		return tx, jerr
 	}
-	*tx = rr.Ok
-	l.Info("end")
-	return e
+	l.Debugf("site=%v", rr.Ok)
+	return rr.Ok, e
 }
 
 // Update updates a single ThreatX site
-func (tx *ThreatXSite) Update(ctx context.Context, sec *ThreatXSecret) error {
+func (s *ThreatXStore) UpdateSite(ctx context.Context, tx ThreatXSite) error {
 	l := log.WithFields(log.Fields{
-		"func": "ThreatXSite.Update",
+		"func": "ThreatXStore.UpdateSite",
 	})
 	l.Info("start")
-	if sec.AuthToken == "" {
+	if s.AuthToken == "" {
 		l.Error("auth_token is empty")
 		return errors.New("auth_token is empty")
 	}
@@ -227,10 +224,10 @@ func (tx *ThreatXSite) Update(ctx context.Context, sec *ThreatXSecret) error {
 	}
 	r := &TReq{
 		Command:      "update",
-		Token:        sec.AuthToken,
-		CustomerName: sec.CustomerName,
-		Name:         tx.Hostname,
-		ThreatXSite:  *tx,
+		Token:        s.AuthToken,
+		CustomerName: s.CustomerName,
+		Name:         s.Hostname,
+		ThreatXSite:  tx,
 	}
 	jd, jerr := json.Marshal(r)
 	if jerr != nil {
@@ -251,7 +248,7 @@ func (tx *ThreatXSite) Update(ctx context.Context, sec *ThreatXSecret) error {
 		return err
 	}
 	defer resp.Body.Close()
-	bd, berr := ioutil.ReadAll(resp.Body)
+	bd, berr := io.ReadAll(resp.Body)
 	if berr != nil {
 		l.Error(berr)
 		return berr
@@ -263,85 +260,63 @@ func (tx *ThreatXSite) Update(ctx context.Context, sec *ThreatXSecret) error {
 		return err
 	}
 	l.Debugf("response=%s", string(bd))
-	l.Info("end")
 	return nil
 }
 
-// ThreatxCerts accepts a slice of Secrets and returns only those configured
-// for replication to ThreatX
-func ThreatxCerts(s []corev1.Secret) []corev1.Secret {
-	var c []corev1.Secret
-	for _, v := range s {
-		if v.Annotations[operatorName+"/threatx-hostname"] != "" && cacheChanged(v) {
-			c = append(c, v)
-		}
+func (s *ThreatXStore) ParseCertificate(c *tlssecret.Certificate) error {
+	l := log.WithFields(log.Fields{
+		"func": "ThreatXStore.ParseCertificate",
+	})
+	l.Debug("start")
+	if c.Annotations[state.OperatorName+"/threatx-secret-name"] != "" {
+		s.SecretName = c.Annotations[state.OperatorName+"/threatx-secret-name"]
 	}
-	return c
+	if c.Annotations[state.OperatorName+"/threatx-hostname"] != "" {
+		s.Hostname = c.Annotations[state.OperatorName+"/threatx-hostname"]
+	}
+	if strings.Contains(s.SecretName, "/") {
+		s.SecretNamespace = strings.Split(s.SecretName, "/")[0]
+		s.SecretName = strings.Split(s.SecretName, "/")[1]
+	}
+	return nil
 }
 
-// handleThreatxCerts handles the sync of all ThreatX-enabled certs
-func handleThreatxCerts(ss []corev1.Secret) {
-	ss = ThreatxCerts(ss)
-	l := log.WithFields(
-		log.Fields{
-			"action": "handleThreatxCerts",
-		},
-	)
-	l.Print("handleThreatxCerts")
-	ctx := context.Background()
-	for i, s := range ss {
-		l.Debugf("processing secret %s (%d/%d)", s.ObjectMeta.Name, i+1, len(ss))
-		ts := &ThreatXSecret{
-			Name: s.Annotations[operatorName+"/threatx-secret-name"],
-		}
-		l.Debugf("getting secret %s", ts.Name)
-		gerr := ts.Get(ctx)
-		if gerr != nil {
-			l.WithFields(log.Fields{
-				"hostname":   s.Annotations[operatorName+"/threatx-hostname"],
-				"secretName": s.Annotations[operatorName+"/threatx-secret-name"],
-			}).Printf("is.Get error=%v", gerr)
-			continue
-		}
-		l.Debugf("logging in")
-		lerr := ts.ThreatxLogin(ctx)
-		if lerr != nil {
-			l.WithFields(log.Fields{
-				"hostname":   s.Annotations[operatorName+"/threatx-hostname"],
-				"secretName": s.Annotations[operatorName+"/threatx-secret-name"],
-			}).Printf("ThreatxLogin error=%v", lerr)
-			continue
-		}
-		l.Debugf("secret %+v", ts)
-		txs := &ThreatXSite{
-			Hostname: s.Annotations[operatorName+"/threatx-hostname"],
-		}
-		l.Debugf("getting site %s", s.Annotations[operatorName+"/threatx-hostname"])
-		err := txs.Get(ctx, ts)
-		if err != nil {
-			l.WithFields(log.Fields{
-				"hostname":   s.Annotations[operatorName+"/threatx-hostname"],
-				"secretName": s.Annotations[operatorName+"/threatx-secret-name"],
-			}).Printf("is.Get error=%v", err)
-			continue
-		}
-		l.Debugf("updating site %s", s.Annotations[operatorName+"/threatx-hostname"])
-		c := secretToCert(s)
-		// https://support.threatx.com/hc/en-us/articles/360000661851-API-Reference-Guide-1-34-0#Actortags:-delete
-		txs.SslBlob = string(c.Certificate) + string(c.Chain) + string(c.Key)
-		txs.SslEnabled = true
-		l.Debugf("updating secret %s", s.Annotations[operatorName+"/threatx-secret-name"])
-		uerr := txs.Update(
-			ctx,
-			ts,
-		)
-		if uerr != nil {
-			l.WithFields(log.Fields{
-				"hostname":   s.Annotations[operatorName+"/threatx-hostname"],
-				"secretName": s.Annotations[operatorName+"/threatx-secret-name"],
-			}).Printf("ThreatX Update error=%v", uerr)
-			continue
-		}
-		addToCache(c)
+func (s *ThreatXStore) Update(secret *corev1.Secret) error {
+	l := log.WithFields(log.Fields{
+		"action":          "Update",
+		"store":           "threatx",
+		"secretName":      secret.ObjectMeta.Name,
+		"secretNamespace": secret.ObjectMeta.Namespace,
+	})
+	l.Info("start")
+	cert := tlssecret.ParseSecret(secret)
+	if err := s.ParseCertificate(cert); err != nil {
+		l.Error(err)
+		return err
 	}
+	l = l.WithFields(log.Fields{
+		"hostname": s.Hostname,
+	})
+	ctx := context.Background()
+	if err := s.GetAPIKey(ctx); err != nil {
+		l.Error(err)
+		return err
+	}
+	if err := s.ThreatxLogin(ctx); err != nil {
+		l.Error(err)
+		return err
+	}
+	site, err := s.GetSite(ctx)
+	if err != nil {
+		l.Error(err)
+		return err
+	}
+	site.SslBlob = string(cert.Certificate) + string(cert.Key)
+	site.SslEnabled = true
+	if err := s.UpdateSite(ctx, site); err != nil {
+		l.Error(err)
+		return err
+	}
+	l.Info("certificate synced")
+	return nil
 }

@@ -23,7 +23,7 @@ spec:
       imagePullSecrets:
         - name: regcred
       containers:
-        - image: registry.example.com/devops/cert-manager-sync:v0.0.1
+        - image: robertlestak/cert-manager-sync:latest
           name: cert-manager-sync
           env:
             - name: INCAPSULA_API
@@ -41,3 +41,8 @@ spec:
             requests:
               cpu: 500m
               memory: 500Mi
+      tolerations:
+        - key: "node.kubernetes.io/arch"
+          operator: "Equal"
+          value: "arm64"
+          effect: "NoSchedule"
