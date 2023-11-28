@@ -31,3 +31,9 @@ jobs:
         push: true
         tags: ${{ secrets.DOCKER_USERNAME }}/cert-manager-sync:${{ inputs.tag || github.sha }}
         platforms: linux/amd64,linux/arm64
+    - name: Tag image as latest
+      if: ${{ inputs.tag != 'latest' }}
+      run: |
+        ORIGINAL_IMAGE=${{ secrets.DOCKER_USERNAME }}/cert-manager-sync:${{ inputs.tag || github.sha }}
+        NEW_IMAGE=${{ secrets.DOCKER_USERNAME }}/cert-manager-sync:latest
+        docker buildx imagetools create ${ORIGINAL_IMAGE} --tag ${NEW_IMAGE}
