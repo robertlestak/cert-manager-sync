@@ -2,7 +2,7 @@
 
 # cert-manager-sync
 
-Enable Kubernetes `cert-manager` to sync TLS certificates to AWS ACM, HashiCorp Vault, Incapsula, and ThreatX.
+Enable Kubernetes `cert-manager` to sync TLS certificates to AWS ACM, GCP, HashiCorp Vault, Incapsula, and ThreatX.
 
 ## Architecture
 
@@ -23,6 +23,12 @@ This operator fully automates this process, so that developers must only annotat
 When the certificate is provisioned by `cert-manager`, the `cert-manager-sync` operator will sync the certificate to the upstream certificate provider(s) defined in the TLS secret annotations.
 
 ## Certificate Stores
+
+Certificate stores are configured via Kubernetes annotations on the TLS secret created / managed by `cert-manager`. Before a store can be used, you must enable the sync on the TLS secret by setting the `cert-manager-sync.lestak.sh/sync-enabled` annotation to `true`.
+
+```yaml
+    cert-manager-sync.lestak.sh/sync-enabled: "true" # enable sync on tls secret
+```
 
 ### AWS ACM
 
@@ -116,7 +122,7 @@ Annotations:
 
 The operator uses Kubernetes annotations to define the sync locations and configurations.
 
-The following example contains all supported annotations.
+The following example secret contains all supported annotations.
 
 ```yaml
 ---
@@ -145,16 +151,38 @@ metadata:
     cert-manager-sync.lestak.sh/vault-auth-method: "auth-method" # HashiCorp Vault auth method name
     cert-manager-sync.lestak.sh/vault-path: "kv-name/path/to/secret" # HashiCorp Vault path to store cert
 data:
-  ca.crt: ""
   tls.crt: ""
   tls.key: ""
+```
+
+`cert-manager-sync` only looks at kubernetes secrets, however you can create a `cert-manager` `Certificate` resource with the annotations inline if you would like:
+
+```yaml
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+ name: example.com
+ namespace: cert-manager
+spec:
+ secretName: example.com
+ secretTemplate:
+  annotations:
+    cert-manager-sync.lestak.sh/sync-enabled: "true" # enable sync on tls secret
+    cert-manager-sync.lestak.sh/incapsula-site-id: "12345" # incapsula site to attach cert
+    cert-manager-sync.lestak.sh/incapsula-secret-name: "cert-manager-sync-poc" # secret in same namespace which contains incapsula api key. if provided in format "namespace/secret-name", will look in that namespace for the secret
+ issuerRef:
+   name: my-issuer
+   kind: Issuer
+ dnsNames:
+   - 'example.com'
 ```
 
 ## Deployment
 
 Create `regcred` registry credential secret in `cert-manager` namespace.
 
-If you want to store the certs in different namespaces, modify `SECRETS_NAMESPACE` var in the [deployment file](devops/k8s/deploy.yaml). If this value is not set, all namespaces will be watched.
+If you want to store the certs in different namespaces, modify `SECRETS_NAMESPACE` var in the [deployment file](devops/k8s/deploy.yaml). If this value is not set (or set to an empty value `""`), all namespaces will be watched.
 
 ```bash
 kubectl apply -f devops/k8s
