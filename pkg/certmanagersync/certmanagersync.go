@@ -2,6 +2,7 @@ package certmanagersync
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/robertlestak/cert-manager-sync/pkg/state"
 	"github.com/robertlestak/cert-manager-sync/stores/acm"
@@ -135,12 +136,17 @@ func HandleSecret(s *corev1.Secret) error {
 	}
 	// wait for all stores to finish syncing
 	// if a store returns an error, return the error
+	// but only after all stores have finished syncing
+	var errs []error
 	for i := 0; i < len(stores); i++ {
 		err := <-errors
 		if err != nil {
 			l.WithError(err).Errorf("SyncCertToStore error")
-			return err
+			errs = append(errs, err)
 		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("errors syncing secret %s/%s to stores: %v", s.Namespace, s.Name, errs)
 	}
 	// if the sync was a success, add the secret to the cache
 	state.AddToCache(s)
