@@ -63,6 +63,7 @@ Annotations:
     cert-manager-sync.lestak.sh/gcp-enabled: "true" # sync certificate to GCP
     cert-manager-sync.lestak.sh/gcp-location: LOCATION # GCP location to store cert
     cert-manager-sync.lestak.sh/gcp-project: PROJECT_ID # GCP project to store cert
+    cert-manager-sync.lestak.sh/gcp-certificate-name: "" # will be auto-filled by operator for in-place renewals
 ```
 
 ### Incapsula
@@ -141,6 +142,7 @@ metadata:
     cert-manager-sync.lestak.sh/gcp-enabled: "true" # sync certificate to GCP
     cert-manager-sync.lestak.sh/gcp-location: LOCATION # GCP location to store cert
     cert-manager-sync.lestak.sh/gcp-project: PROJECT_ID # GCP project to store cert
+    cert-manager-sync.lestak.sh/gcp-certificate-name: "" # will be auto-filled by operator for in-place renewals
     cert-manager-sync.lestak.sh/incapsula-site-id: "12345" # incapsula site to attach cert
     cert-manager-sync.lestak.sh/incapsula-secret-name: "cert-manager-sync-poc" # secret in same namespace which contains incapsula api key
     cert-manager-sync.lestak.sh/threatx-hostname: "example.com" # threatx hostname to attach cert
