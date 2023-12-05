@@ -20,7 +20,7 @@ import (
 var (
 	OperatorName = "cert-manager-sync.lestak.sh"
 	KubeClient   *kubernetes.Clientset
-	Cache        []*corev1.Secret
+	Cache        map[string]*corev1.Secret
 	cacheLock    sync.Mutex
 )
 
@@ -32,32 +32,33 @@ func AddToCache(secret *corev1.Secret) {
 			"namespace":  secret.ObjectMeta.Namespace,
 		},
 	)
-	l.Debug("addToCache")
+	l.Debug("adding secret to cache")
 	cacheLock.Lock()
-	var nc []*corev1.Secret
-	for _, v := range Cache {
-		newKey := fmt.Sprintf("%s/%s", secret.Namespace, secret.Name)
-		oldKey := fmt.Sprintf("%s/%s", v.Namespace, v.Name)
-		l.Debugf("newKey=%s oldKey=%s", newKey, oldKey)
-		if newKey != oldKey {
-			nc = append(nc, v)
-		}
+	defer cacheLock.Unlock()
+	key := fmt.Sprintf("%s/%s", secret.Namespace, secret.Name)
+	if Cache == nil {
+		Cache = make(map[string]*corev1.Secret)
 	}
-	nc = append(nc, secret)
-	Cache = nc
+	Cache[key] = secret
 	l.Debugf("cache length: %d", len(Cache))
-	cacheLock.Unlock()
 }
 
 func stringMapChanged(a, b map[string]string) bool {
+	l := log.WithFields(log.Fields{
+		"action": "stringMapChanged",
+	})
+	l.Debug("Checking stringMapChanged")
 	if len(a) != len(b) {
+		l.Debugf("stringMapChanged: len(a)=%d len(b)=%d", len(a), len(b))
 		return true
 	}
 	for k, v := range a {
 		if b[k] != v {
+			l.Debugf("stringMapChanged: a[%s]=%s b[%s]=%s", k, v, k, b[k])
 			return true
 		}
 	}
+	l.Debug("stringMapChanged: false")
 	return false
 }
 
@@ -68,41 +69,33 @@ func CacheChanged(s *corev1.Secret) bool {
 			"secretName": s.ObjectMeta.Name,
 		},
 	)
-	l.Debug("check cacheChanged")
+	l.Debug("checking cacheChanged")
 	if os.Getenv("CACHE_DISABLE") == "true" {
 		l.Debug("cache disabled")
 		return true
 	}
-	if len(Cache) == 0 {
-		l.Debug("cache is empty")
+	key := fmt.Sprintf("%s/%s", s.Namespace, s.Name)
+	if Cache == nil {
+		l.Debug("cache not initialized")
 		return true
 	}
-	l.Debugf("cache length: %d", len(Cache))
-	var found bool
-	for _, v := range Cache {
-		l.Debugf("checking cache for secret %s", v.Name)
-		oldCert := tlssecret.ParseSecret(v)
-		newCert := tlssecret.ParseSecret(s)
-		nameMatch := v.Name == s.ObjectMeta.Name
-		namespaceMatch := v.Namespace == s.ObjectMeta.Namespace
-		// if no namespace is specified, match all namespaces
-		if v.Namespace == "" {
-			namespaceMatch = true
-		}
-		if nameMatch && namespaceMatch {
-			found = true
-		}
-		certChanged := string(oldCert.Certificate) != string(newCert.Certificate)
-		labelsChanged := stringMapChanged(v.Labels, s.Labels)
-		annotationsChanged := stringMapChanged(v.Annotations, s.Annotations)
-		l.Debugf("cache status %s: certChanged=%t labelsChanged=%t annotationsChanged=%t",
-			v.Name, certChanged, labelsChanged, annotationsChanged)
-		if nameMatch && (certChanged || labelsChanged || annotationsChanged) {
-			l.Debugf("cache changed: %s", s.ObjectMeta.Name)
-			return true
-		}
+	if _, exists := Cache[key]; !exists {
+		// Secret not found in the cache, consider it as changed
+		l.Debug("secret not found in cache")
+		return true
 	}
-	if !found {
+	oldSecret := Cache[key]
+	oldCert := tlssecret.ParseSecret(oldSecret)
+	newCert := tlssecret.ParseSecret(s)
+
+	certChanged := string(oldCert.Certificate) != string(newCert.Certificate)
+	labelsChanged := stringMapChanged(oldSecret.Labels, s.Labels)
+	annotationsChanged := stringMapChanged(oldSecret.Annotations, s.Annotations)
+
+	l.Debugf("cache status %s: certChanged=%t labelsChanged=%t annotationsChanged=%t",
+		oldSecret.Name, certChanged, labelsChanged, annotationsChanged)
+
+	if certChanged || labelsChanged || annotationsChanged {
 		l.Debugf("cache changed: %s", s.ObjectMeta.Name)
 		return true
 	}
