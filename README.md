@@ -111,7 +111,7 @@ Annotations:
 
 ```yaml
     cert-manager-sync.lestak.sh/vault-addr: "https://vault.example.com" # HashiCorp Vault address
-    cert-manager-sync.lestak.sh/vault-namespace: "my-ns/example" # HashiCorp Vault address
+    cert-manager-sync.lestak.sh/vault-namespace: "my-ns/example" # HashiCorp Vault namespace. Only required for Vault EE.
     cert-manager-sync.lestak.sh/vault-role: "role-name" # HashiCorp Vault role name
     cert-manager-sync.lestak.sh/vault-auth-method: "auth-method" # HashiCorp Vault auth method name
     cert-manager-sync.lestak.sh/vault-path: "kv-name/path/to/secret" # HashiCorp Vault path to store cert
@@ -146,7 +146,7 @@ metadata:
     cert-manager-sync.lestak.sh/threatx-hostname: "example.com" # threatx hostname to attach cert
     cert-manager-sync.lestak.sh/threatx-secret-name: "example-threatx-api-secret" # secret in same namespace which contains threatx api key
     cert-manager-sync.lestak.sh/vault-addr: "https://vault.example.com" # HashiCorp Vault address
-    cert-manager-sync.lestak.sh/vault-namespace: "my-ns/example" # HashiCorp Vault address
+    cert-manager-sync.lestak.sh/vault-namespace: "my-ns/example" # HashiCorp Vault namespace. Only required for Vault EE.
     cert-manager-sync.lestak.sh/vault-role: "role-name" # HashiCorp Vault role name
     cert-manager-sync.lestak.sh/vault-auth-method: "auth-method" # HashiCorp Vault auth method name
     cert-manager-sync.lestak.sh/vault-path: "kv-name/path/to/secret" # HashiCorp Vault path to store cert
