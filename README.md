@@ -96,6 +96,7 @@ You will then annotate your k8s TLS secret with this secret name to tell the ope
 Annotations:
 
 ```yaml
+    cert-manager-sync.lestak.sh/heroku-enabled: "true" # sync certificate to Heroku
     cert-manager-sync.lestak.sh/heroku-app: "example-app" # heroku app to attach cert
     cert-manager-sync.lestak.sh/heroku-secret-name: "example-heroku-secret" # secret in same namespace which contains the heroku api key. If provided in format "namespace/secret-name", will look in that namespace for the secret
     cert-manager-sync.lestak.sh/heroku-cert-name: "" # will be auto-filled by operator for in-place renewals
@@ -163,6 +164,7 @@ metadata:
     cert-manager-sync.lestak.sh/gcp-location: LOCATION # GCP location to store cert
     cert-manager-sync.lestak.sh/gcp-project: PROJECT_ID # GCP project to store cert
     cert-manager-sync.lestak.sh/gcp-certificate-name: "" # will be auto-filled by operator for in-place renewals
+    cert-manager-sync.lestak.sh/heroku-enabled: "true" # sync certificate to Heroku
     cert-manager-sync.lestak.sh/heroku-app: "example-app" # heroku app to attach cert
     cert-manager-sync.lestak.sh/heroku-secret-name: "example-heroku-secret" # secret in same namespace which contains heroku api key
     cert-manager-sync.lestak.sh/heroku-cert-name: "" # will be auto-filled by operator for in-place renewals
