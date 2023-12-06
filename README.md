@@ -2,7 +2,7 @@
 
 # cert-manager-sync
 
-Enable Kubernetes `cert-manager` to sync TLS certificates to AWS ACM, GCP, HashiCorp Vault, Incapsula, and ThreatX.
+Enable Kubernetes `cert-manager` to sync TLS certificates to AWS ACM, GCP, HashiCorp Vault, and other remote certificate stores.
 
 ## Architecture
 
@@ -66,9 +66,44 @@ Annotations:
     cert-manager-sync.lestak.sh/gcp-certificate-name: "" # will be auto-filled by operator for in-place renewals
 ```
 
+### HashiCorp Vault
+
+HashiCorp Vault relies on the [Kubernetes Auth Method](https://www.vaultproject.io/docs/auth/kubernetes) to securely issue the operator a short-lived token according to your Vault policy. This token is then used to sync the updated certs to Vault so that they can be used by Vault-integrated applications and services.
+
+Annotations:
+
+```yaml
+    cert-manager-sync.lestak.sh/vault-addr: "https://vault.example.com" # HashiCorp Vault address
+    cert-manager-sync.lestak.sh/vault-namespace: "my-ns/example" # HashiCorp Vault namespace. Only required for Vault EE.
+    cert-manager-sync.lestak.sh/vault-role: "role-name" # HashiCorp Vault role name
+    cert-manager-sync.lestak.sh/vault-auth-method: "auth-method" # HashiCorp Vault auth method name
+    cert-manager-sync.lestak.sh/vault-path: "kv-name/path/to/secret" # HashiCorp Vault path to store cert
+
+```
+
+### Heroku
+
+Create a Heroku API Key and create a kube secret containing this key.
+
+```bash
+kubectl -n cert-manager \
+	create secret generic example-heroku-secret \
+	--from-literal api_key=XXXXX
+```
+
+You will then annotate your k8s TLS secret with this secret name to tell the operator to retrieve the Heroku API secret from this location.
+
+Annotations:
+
+```yaml
+    cert-manager-sync.lestak.sh/heroku-app: "example-app" # heroku app to attach cert
+    cert-manager-sync.lestak.sh/heroku-secret-name: "example-heroku-secret" # secret in same namespace which contains the heroku api key. If provided in format "namespace/secret-name", will look in that namespace for the secret
+    cert-manager-sync.lestak.sh/heroku-cert-name: "" # will be auto-filled by operator for in-place renewals
+```
+
 ### Incapsula
 
-Create an Incapsula API Key and create a kube secret in the namespace in which the operator runs.
+Create an Incapsula API Key and create a kube secret containing this key.
 
 ```bash
 kubectl -n cert-manager \
@@ -104,21 +139,6 @@ Annotations:
     cert-manager-sync.lestak.sh/threatx-secret-name: "example-threatx-api-secret" # secret in same namespace which contains the threatx api key. If provided in format "namespace/secret-name", will look in that namespace for the secret
 ```
 
-### HashiCorp Vault
-
-HashiCorp Vault relies on the [Kubernetes Auth Method](https://www.vaultproject.io/docs/auth/kubernetes) to securely issue the operator a short-lived token according to your Vault policy. This token is then used to sync the updated certs to Vault so that they can be used by Vault-integrated applications and services.
-
-Annotations:
-
-```yaml
-    cert-manager-sync.lestak.sh/vault-addr: "https://vault.example.com" # HashiCorp Vault address
-    cert-manager-sync.lestak.sh/vault-namespace: "my-ns/example" # HashiCorp Vault namespace. Only required for Vault EE.
-    cert-manager-sync.lestak.sh/vault-role: "role-name" # HashiCorp Vault role name
-    cert-manager-sync.lestak.sh/vault-auth-method: "auth-method" # HashiCorp Vault auth method name
-    cert-manager-sync.lestak.sh/vault-path: "kv-name/path/to/secret" # HashiCorp Vault path to store cert
-
-```
-
 ## Configuration
 
 The operator uses Kubernetes annotations to define the sync locations and configurations.
@@ -143,6 +163,9 @@ metadata:
     cert-manager-sync.lestak.sh/gcp-location: LOCATION # GCP location to store cert
     cert-manager-sync.lestak.sh/gcp-project: PROJECT_ID # GCP project to store cert
     cert-manager-sync.lestak.sh/gcp-certificate-name: "" # will be auto-filled by operator for in-place renewals
+    cert-manager-sync.lestak.sh/heroku-app: "example-app" # heroku app to attach cert
+    cert-manager-sync.lestak.sh/heroku-secret-name: "example-heroku-secret" # secret in same namespace which contains heroku api key
+    cert-manager-sync.lestak.sh/heroku-cert-name: "" # will be auto-filled by operator for in-place renewals
     cert-manager-sync.lestak.sh/incapsula-site-id: "12345" # incapsula site to attach cert
     cert-manager-sync.lestak.sh/incapsula-secret-name: "cert-manager-sync-poc" # secret in same namespace which contains incapsula api key
     cert-manager-sync.lestak.sh/threatx-hostname: "example.com" # threatx hostname to attach cert

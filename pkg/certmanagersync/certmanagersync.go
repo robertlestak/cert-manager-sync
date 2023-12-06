@@ -7,6 +7,7 @@ import (
 	"github.com/robertlestak/cert-manager-sync/pkg/state"
 	"github.com/robertlestak/cert-manager-sync/stores/acm"
 	"github.com/robertlestak/cert-manager-sync/stores/gcpcm"
+	"github.com/robertlestak/cert-manager-sync/stores/heroku"
 	"github.com/robertlestak/cert-manager-sync/stores/incapsula"
 	"github.com/robertlestak/cert-manager-sync/stores/threatx"
 	"github.com/robertlestak/cert-manager-sync/stores/vault"
@@ -19,6 +20,7 @@ type StoreType string
 const (
 	ACMStoreType       StoreType = "acm"
 	GCPStoreType       StoreType = "gcp"
+	HerokuStoreType    StoreType = "heroku"
 	IncapsulaStoreType StoreType = "incapsula"
 	ThreatxStoreType   StoreType = "threatx"
 	VaultStoreType     StoreType = "vault"
@@ -40,6 +42,8 @@ func NewStore(storeType StoreType) (RemoteStore, error) {
 		store = &acm.ACMStore{}
 	case GCPStoreType:
 		store = &gcpcm.GCPStore{}
+	case HerokuStoreType:
+		store = &heroku.HerokuStore{}
 	case IncapsulaStoreType:
 		store = &incapsula.IncapsulaStore{}
 	case ThreatxStoreType:
@@ -90,6 +94,11 @@ func EnabledStores(s *corev1.Secret) []StoreType {
 	if s.Annotations[state.OperatorName+"/gcp-enabled"] == "true" {
 		l.Debug("sync-enabled gcp")
 		stores = append(stores, GCPStoreType)
+	}
+	// if there is a heroku-enabled = true annotation, add heroku to the list of stores
+	if s.Annotations[state.OperatorName+"/heroku-enabled"] == "true" {
+		l.Debug("sync-enabled heroku")
+		stores = append(stores, HerokuStoreType)
 	}
 	return stores
 }
