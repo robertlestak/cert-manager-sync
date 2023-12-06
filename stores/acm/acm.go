@@ -184,7 +184,7 @@ func (s *ACMStore) Update(secret *corev1.Secret) error {
 	})
 	if origArn != s.CertificateArn {
 		// update the secret to reflect the new arn
-		c.Annotations[state.OperatorName+"/acm-certificate-arn"] = s.CertificateArn
+		secret.Annotations[state.OperatorName+"/acm-certificate-arn"] = s.CertificateArn
 		sc := state.KubeClient.CoreV1().Secrets(secret.ObjectMeta.Namespace)
 		uo := metav1.UpdateOptions{}
 		_, uerr := sc.Update(
