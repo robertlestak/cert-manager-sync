@@ -81,7 +81,7 @@ func (s *DigitalOceanStore) Update(secret *corev1.Secret) error {
 	l.Debugf("Update")
 	c := tlssecret.ParseSecret(secret)
 	if err := s.ParseCertificate(c); err != nil {
-		l.WithError(err).Errorf("incapsula.ParseCertificate error")
+		l.WithError(err).Errorf("ParseCertificate error")
 		return err
 	}
 	if s.SecretNamespace == "" {
@@ -92,7 +92,7 @@ func (s *DigitalOceanStore) Update(secret *corev1.Secret) error {
 	}
 	ctx := context.Background()
 	if err := s.GetApiKey(ctx); err != nil {
-		l.WithError(err).Errorf("incapsula.GetApiKey error")
+		l.WithError(err).Errorf("GetApiKey error")
 		return err
 	}
 	tokenSource := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: s.ApiKey})
