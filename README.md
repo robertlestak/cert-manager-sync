@@ -106,6 +106,14 @@ metadata:
     iam.gke.io/gcp-service-account: GSA_NAME@PROJECT_ID.iam.gserviceaccount.com
 ```
 
+If your workload does not run in GKE, you can create a k8s secret with the GCP credentials and annotate the TLS secret with the secret name with your `GOOGLE_APPLICATION_CREDENTIALS`.
+
+```bash
+kubectl -n cert-manager \
+  create secret generic example-gcp-secret \
+  --from-file=GOOGLE_APPLICATION_CREDENTIALS=/path/to/credentials.json
+```
+
 Annotations:
 
 ```yaml
@@ -113,6 +121,7 @@ Annotations:
     cert-manager-sync.lestak.sh/gcp-location: LOCATION # GCP location to store cert
     cert-manager-sync.lestak.sh/gcp-project: PROJECT_ID # GCP project to store cert
     cert-manager-sync.lestak.sh/gcp-certificate-name: "" # will be auto-filled by operator for in-place renewals
+    cert-manager-sync.lestak.sh/gcp-secret-name: "" # (optional if not using GKE) secret in same namespace which contains the gcp credentials. If provided in format "namespace/secret-name", will look in that namespace for the secret
 ```
 
 ### HashiCorp Vault
@@ -209,6 +218,7 @@ metadata:
     cert-manager-sync.lestak.sh/acm-role-arn: "" # Role ARN to assume if set
     cert-manager-sync.lestak.sh/acm-region: "" # Region to use. If not set, will use AWS_REGION env var, or us-east-1 if not set
     cert-manager-sync.lestak.sh/acm-certificate-arn: "" # will be auto-filled by operator for in-place renewals
+    cert-manager-sync.lestak.sh/acm-secret-name: "" # (optional if not using IRSA) secret in same namespace which contains the aws credentials. If provided in format "namespace/secret-name", will look in that namespace for the secret
     cert-manager-sync.lestak.sh/cloudflare-enabled: "true" # sync certificate to Cloudflare
     cert-manager-sync.lestak.sh/cloudflare-secret-name: "example-cloudflare-secret" # secret in same namespace which contains the cloudflare api key. If provided in format "namespace/secret-name", will look in that namespace for the secret
     cert-manager-sync.lestak.sh/cloudflare-zone-id: "example-zone-id" # cloudflare zone id
@@ -221,6 +231,7 @@ metadata:
     cert-manager-sync.lestak.sh/gcp-location: LOCATION # GCP location to store cert
     cert-manager-sync.lestak.sh/gcp-project: PROJECT_ID # GCP project to store cert
     cert-manager-sync.lestak.sh/gcp-certificate-name: "" # will be auto-filled by operator for in-place renewals
+    cert-manager-sync.lestak.sh/gcp-secret-name: "" # (optional if not using GKE) secret in same namespace which contains the gcp credentials. If provided in format "namespace/secret-name", will look in that namespace for the secret
     cert-manager-sync.lestak.sh/heroku-enabled: "true" # sync certificate to Heroku
     cert-manager-sync.lestak.sh/heroku-app: "example-app" # heroku app to attach cert
     cert-manager-sync.lestak.sh/heroku-secret-name: "example-heroku-secret" # secret in same namespace which contains heroku api key

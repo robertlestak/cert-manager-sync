@@ -2,12 +2,15 @@ package gcpcm
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	certificatemanager "cloud.google.com/go/certificatemanager/apiv1"
 	"cloud.google.com/go/certificatemanager/apiv1/certificatemanagerpb"
 	"github.com/robertlestak/cert-manager-sync/pkg/state"
 	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
 	log "github.com/sirupsen/logrus"
+	"google.golang.org/api/option"
 	"google.golang.org/genproto/protobuf/field_mask"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -17,9 +20,24 @@ type GCPStore struct {
 	CertificateName string
 	ProjectID       string
 	Location        string
-
+	SecretName      string
+	SecretNamespace string
+	CredentialsJSON string
 	// unexported
 	client *certificatemanager.Client
+}
+
+func (s *GCPStore) GetApiKey(ctx context.Context) error {
+	gopt := metav1.GetOptions{}
+	sc, err := state.KubeClient.CoreV1().Secrets(s.SecretNamespace).Get(ctx, s.SecretName, gopt)
+	if err != nil {
+		return err
+	}
+	if sc.Data["GOOGLE_APPLICATION_CREDENTIALS"] == nil {
+		return fmt.Errorf("GOOGLE_APPLICATION_CREDENTIALS not found in secret %s/%s", s.SecretNamespace, s.SecretName)
+	}
+	s.CredentialsJSON = string(sc.Data["GOOGLE_APPLICATION_CREDENTIALS"])
+	return nil
 }
 
 // secretToGCPInput converts a k8s secret to a properly-formatted GCP Import object
@@ -49,6 +67,14 @@ func (s *GCPStore) ParseCertificate(c *tlssecret.Certificate) error {
 	}
 	if c.Annotations[state.OperatorName+"/gcp-certificate-name"] != "" {
 		s.CertificateName = c.Annotations[state.OperatorName+"/gcp-certificate-name"]
+	}
+	if c.Annotations[state.OperatorName+"/gcp-secret-name"] != "" {
+		s.SecretName = c.Annotations[state.OperatorName+"/gcp-secret-name"]
+	}
+	// if secret name is in the format of "namespace/secretname" then parse it
+	if strings.Contains(s.SecretName, "/") {
+		s.SecretNamespace = strings.Split(s.SecretName, "/")[0]
+		s.SecretName = strings.Split(s.SecretName, "/")[1]
 	}
 	return nil
 }
@@ -115,19 +141,28 @@ func (s *GCPStore) Update(secret *corev1.Secret) error {
 		"secretNamespace": secret.ObjectMeta.Namespace,
 	})
 	l.Debugf("Update")
-	ctx := context.Background()
-	client, err := certificatemanager.NewClient(ctx)
-	if err != nil {
-		l.WithError(err).Errorf("certificatemanager.NewClient error")
-		return err
-	}
-	s.client = client
 	c := tlssecret.ParseSecret(secret)
 	if err := s.ParseCertificate(c); err != nil {
 		l.WithError(err).Errorf("vault.ParseCertificate error")
 		return err
 	}
 	gcert := s.secretToGCPCert(secret)
+	ctx := context.Background()
+	var clientOpts []option.ClientOption
+	if s.SecretName != "" {
+		if err := s.GetApiKey(ctx); err != nil {
+			l.WithError(err).Errorf("gcp.GetApiKey error")
+			return err
+		}
+		opt := option.WithCredentialsJSON([]byte(s.CredentialsJSON))
+		clientOpts = append(clientOpts, opt)
+	}
+	client, err := certificatemanager.NewClient(ctx, clientOpts...)
+	if err != nil {
+		l.WithError(err).Errorf("certificatemanager.NewClient error")
+		return err
+	}
+	s.client = client
 	// if there is no secret name, this is the first time we are sending to GCP, create
 	if s.CertificateName == "" {
 		err = s.CreateCert(ctx, gcert)
