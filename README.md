@@ -43,6 +43,27 @@ Annotations:
     cert-manager-sync.lestak.sh/acm-certificate-arn: "" # will be auto-filled by operator for in-place renewals
 ```
 
+### Cloudflare
+
+Create a Cloudflare API Key and create a kube secret containing this key.
+
+```bash
+kubectl -n cert-manager \
+	create secret generic example-cloudflare-secret \
+	--from-literal api_key=XXXXX --from-literal email=XXXXX
+```
+
+You will then annotate your k8s TLS secret with this secret name to tell the operator to retrieve the Cloudflare API secret from this location.
+
+Annotations:
+
+```yaml
+    cert-manager-sync.lestak.sh/cloudflare-enabled: "true" # sync certificate to Cloudflare
+    cert-manager-sync.lestak.sh/cloudflare-secret-name: "example-cloudflare-secret" # secret in same namespace which contains the cloudflare api key. If provided in format "namespace/secret-name", will look in that namespace for the secret
+    cert-manager-sync.lestak.sh/cloudflare-zone-id: "example-zone-id" # cloudflare zone id
+    cert-manager-sync.lestak.sh/cloudflare-cert-id: "" # will be auto-filled by operator for in-place renewals
+```
+
 ### DigitalOcean
 
 Create a DigitalOcean API Key and create a kube secret containing this key.
@@ -181,6 +202,10 @@ metadata:
     cert-manager-sync.lestak.sh/acm-role-arn: "" # Role ARN to assume if set
     cert-manager-sync.lestak.sh/acm-region: "" # Region to use. If not set, will use AWS_REGION env var, or us-east-1 if not set
     cert-manager-sync.lestak.sh/acm-certificate-arn: "" # will be auto-filled by operator for in-place renewals
+    cert-manager-sync.lestak.sh/cloudflare-enabled: "true" # sync certificate to Cloudflare
+    cert-manager-sync.lestak.sh/cloudflare-secret-name: "example-cloudflare-secret" # secret in same namespace which contains the cloudflare api key. If provided in format "namespace/secret-name", will look in that namespace for the secret
+    cert-manager-sync.lestak.sh/cloudflare-zone-id: "example-zone-id" # cloudflare zone id
+    cert-manager-sync.lestak.sh/cloudflare-cert-id: "" # will be auto-filled by operator for in-place renewals
     cert-manager-sync.lestak.sh/digitalocean-enabled: "true" # sync certificate to DigitalOcean
     cert-manager-sync.lestak.sh/digitalocean-secret-name: "example-digitalocean-secret" # secret in same namespace which contains the digitalocean api key. If provided in format "namespace/secret-name", will look in that namespace for the secret
     cert-manager-sync.lestak.sh/digitalocean-cert-name: "my-cert" # unique name to give your cert in DigitalOcean

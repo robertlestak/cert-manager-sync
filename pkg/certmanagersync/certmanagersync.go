@@ -6,6 +6,7 @@ import (
 
 	"github.com/robertlestak/cert-manager-sync/pkg/state"
 	"github.com/robertlestak/cert-manager-sync/stores/acm"
+	"github.com/robertlestak/cert-manager-sync/stores/cloudflare"
 	"github.com/robertlestak/cert-manager-sync/stores/digitalocean"
 	"github.com/robertlestak/cert-manager-sync/stores/gcpcm"
 	"github.com/robertlestak/cert-manager-sync/stores/heroku"
@@ -20,6 +21,7 @@ type StoreType string
 
 const (
 	ACMStoreType          StoreType = "acm"
+	CloudflareStoreType   StoreType = "cloudflare"
 	DigitalOceanStoreType StoreType = "digitalocean"
 	GCPStoreType          StoreType = "gcp"
 	HerokuStoreType       StoreType = "heroku"
@@ -42,6 +44,8 @@ func NewStore(storeType StoreType) (RemoteStore, error) {
 	switch storeType {
 	case ACMStoreType:
 		store = &acm.ACMStore{}
+	case CloudflareStoreType:
+		store = &cloudflare.CloudflareStore{}
 	case DigitalOceanStoreType:
 		store = &digitalocean.DigitalOceanStore{}
 	case GCPStoreType:
@@ -74,25 +78,20 @@ func EnabledStores(s *corev1.Secret) []StoreType {
 		l.Debug("sync not sync-enabled")
 		return nil
 	}
-	// if there is a vault-addr annotation, add vault to the list of stores
-	if s.Annotations[state.OperatorName+"/vault-addr"] != "" {
-		l.Debug("sync-enabled vault")
-		stores = append(stores, VaultStoreType)
-	}
-	// if there is a incapsula-site-id annotation, add incapsula to the list of stores
-	if s.Annotations[state.OperatorName+"/incapsula-site-id"] != "" {
-		l.Debug("sync-enabled incapsula")
-		stores = append(stores, IncapsulaStoreType)
-	}
-	// if there is a threatx-hostname annotation, add threatx to the list of stores
-	if s.Annotations[state.OperatorName+"/threatx-hostname"] != "" {
-		l.Debug("sync-enabled threatx")
-		stores = append(stores, ThreatxStoreType)
-	}
 	// if there is a acm-enabled = true annotation, add acm to the list of stores
 	if s.Annotations[state.OperatorName+"/acm-enabled"] == "true" {
 		l.Debug("sync-enabled acm")
 		stores = append(stores, ACMStoreType)
+	}
+	// if there is a cloudflare-enabled = true annotation, add cloudflare to the list of stores
+	if s.Annotations[state.OperatorName+"/cloudflare-enabled"] == "true" {
+		l.Debug("sync-enabled cloudflare")
+		stores = append(stores, CloudflareStoreType)
+	}
+	// if there is a digitalocean-enabled = true annotation, add digitalocean to the list of stores
+	if s.Annotations[state.OperatorName+"/digitalocean-enabled"] == "true" {
+		l.Debug("sync-enabled digitalocean")
+		stores = append(stores, DigitalOceanStoreType)
 	}
 	// if there is a gcp-enabled = true annotation, add gcp to the list of stores
 	if s.Annotations[state.OperatorName+"/gcp-enabled"] == "true" {
@@ -104,10 +103,20 @@ func EnabledStores(s *corev1.Secret) []StoreType {
 		l.Debug("sync-enabled heroku")
 		stores = append(stores, HerokuStoreType)
 	}
-	// if there is a digitalocean-enabled = true annotation, add digitalocean to the list of stores
-	if s.Annotations[state.OperatorName+"/digitalocean-enabled"] == "true" {
-		l.Debug("sync-enabled digitalocean")
-		stores = append(stores, DigitalOceanStoreType)
+	// if there is a incapsula-site-id annotation, add incapsula to the list of stores
+	if s.Annotations[state.OperatorName+"/incapsula-site-id"] != "" {
+		l.Debug("sync-enabled incapsula")
+		stores = append(stores, IncapsulaStoreType)
+	}
+	// if there is a threatx-hostname annotation, add threatx to the list of stores
+	if s.Annotations[state.OperatorName+"/threatx-hostname"] != "" {
+		l.Debug("sync-enabled threatx")
+		stores = append(stores, ThreatxStoreType)
+	}
+	// if there is a vault-addr annotation, add vault to the list of stores
+	if s.Annotations[state.OperatorName+"/vault-addr"] != "" {
+		l.Debug("sync-enabled vault")
+		stores = append(stores, VaultStoreType)
 	}
 	return stores
 }
