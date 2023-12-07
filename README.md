@@ -4,6 +4,21 @@
 
 Enable Kubernetes `cert-manager` to sync TLS certificates to AWS ACM, GCP, HashiCorp Vault, and other remote certificate stores.
 
+- [cert-manager-sync](#cert-manager-sync)
+  - [Architecture](#architecture)
+  - [Background](#background)
+  - [Certificate Stores](#certificate-stores)
+    - [AWS ACM](#aws-acm)
+    - [Cloudflare](#cloudflare)
+    - [DigitalOcean](#digitalocean)
+    - [Google Cloud](#google-cloud)
+    - [HashiCorp Vault](#hashicorp-vault)
+    - [Heroku](#heroku)
+    - [Incapsula](#incapsula)
+    - [ThreatX](#threatx)
+  - [Configuration](#configuration)
+  - [Deployment](#deployment)
+
 ## Architecture
 
 ![architecture](./devops/docs/cert-manager-sync.png)
