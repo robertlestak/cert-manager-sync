@@ -32,7 +32,13 @@ Certificate stores are configured via Kubernetes annotations on the TLS secret c
 
 ### AWS ACM
 
-Create an IRSA role with `acm:*` access, and attach the IAM Role to the k8s ServiceAccount in `devops/k8s/sa.yaml`.
+Create an IRSA role with `acm:*` access, and attach the IAM Role to the k8s ServiceAccount in `devops/k8s/sa.yaml`. If your workload does not run in EKS, you can create a k8s secret with the AWS credentials and annotate the TLS secret with the secret name with your `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`.
+
+```bash
+kubectl -n cert-manager \
+	create secret generic example-aws-secret \
+	--from-literal AWS_ACCESS_KEY_ID=XXXXX --from-literal AWS_SECRET_ACCESS_KEY=XXXXX
+```
 
 Annotations:
 
@@ -41,6 +47,7 @@ Annotations:
     cert-manager-sync.lestak.sh/acm-role-arn: "" # Role ARN to assume if set
     cert-manager-sync.lestak.sh/acm-region: "" # Region to use. If not set, will use AWS_REGION env var, or us-east-1 if not set
     cert-manager-sync.lestak.sh/acm-certificate-arn: "" # will be auto-filled by operator for in-place renewals
+    cert-manager-sync.lestak.sh/acm-secret-name: "" # (optional if not using IRSA) secret in same namespace which contains the aws credentials. If provided in format "namespace/secret-name", will look in that namespace for the secret
 ```
 
 ### Cloudflare

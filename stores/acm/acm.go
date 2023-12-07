@@ -2,10 +2,12 @@ package acm
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/acm"
@@ -18,9 +20,30 @@ import (
 )
 
 type ACMStore struct {
-	Region         string
-	RoleArn        string
-	CertificateArn string
+	Region          string
+	RoleArn         string
+	CertificateArn  string
+	SecretName      string
+	SecretNamespace string
+	AccessKeyId     string
+	SecretAccessKey string
+}
+
+func (s *ACMStore) GetApiKey(ctx context.Context) error {
+	gopt := metav1.GetOptions{}
+	sc, err := state.KubeClient.CoreV1().Secrets(s.SecretNamespace).Get(ctx, s.SecretName, gopt)
+	if err != nil {
+		return err
+	}
+	if sc.Data["AWS_ACCESS_KEY_ID"] == nil {
+		return fmt.Errorf("AWS_ACCESS_KEY_ID not found in secret %s/%s", s.SecretNamespace, s.SecretName)
+	}
+	if sc.Data["AWS_SECRET_ACCESS_KEY"] == nil {
+		return fmt.Errorf("AWS_SECRET_ACCESS_KEY not found in secret %s/%s", s.SecretNamespace, s.SecretName)
+	}
+	s.AccessKeyId = string(sc.Data["AWS_ACCESS_KEY_ID"])
+	s.SecretAccessKey = string(sc.Data["AWS_SECRET_ACCESS_KEY"])
+	return nil
 }
 
 // createAWSSession will connect to AWS with the account's credentials from vault
@@ -39,6 +62,13 @@ func (s *ACMStore) createAWSSession() (*session.Session, *aws.Config, error) {
 	}
 	cfg := &aws.Config{
 		Region: aws.String(s.Region),
+	}
+	if s.SecretName != "" {
+		if err := s.GetApiKey(context.Background()); err != nil {
+			l.Debugf("GetApiKey error=%v", err)
+			return nil, nil, err
+		}
+		cfg.Credentials = credentials.NewStaticCredentials(s.AccessKeyId, s.SecretAccessKey, "")
 	}
 	sess, err := session.NewSession(cfg)
 	reqId := uuid.New().String()
@@ -112,6 +142,14 @@ func (s *ACMStore) ParseCertificate(c *tlssecret.Certificate) error {
 	}
 	if c.Annotations[state.OperatorName+"/acm-certificate-arn"] != "" {
 		s.CertificateArn = c.Annotations[state.OperatorName+"/acm-certificate-arn"]
+	}
+	if c.Annotations[state.OperatorName+"/acm-secret-name"] != "" {
+		s.SecretName = c.Annotations[state.OperatorName+"/acm-secret-name"]
+	}
+	// if secret name is in the format of "namespace/secretname" then parse it
+	if strings.Contains(s.SecretName, "/") {
+		s.SecretNamespace = strings.Split(s.SecretName, "/")[0]
+		s.SecretName = strings.Split(s.SecretName, "/")[1]
 	}
 	return nil
 }
