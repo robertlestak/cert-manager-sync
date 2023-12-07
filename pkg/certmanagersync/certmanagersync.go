@@ -6,6 +6,7 @@ import (
 
 	"github.com/robertlestak/cert-manager-sync/pkg/state"
 	"github.com/robertlestak/cert-manager-sync/stores/acm"
+	"github.com/robertlestak/cert-manager-sync/stores/digitalocean"
 	"github.com/robertlestak/cert-manager-sync/stores/gcpcm"
 	"github.com/robertlestak/cert-manager-sync/stores/heroku"
 	"github.com/robertlestak/cert-manager-sync/stores/incapsula"
@@ -18,12 +19,13 @@ import (
 type StoreType string
 
 const (
-	ACMStoreType       StoreType = "acm"
-	GCPStoreType       StoreType = "gcp"
-	HerokuStoreType    StoreType = "heroku"
-	IncapsulaStoreType StoreType = "incapsula"
-	ThreatxStoreType   StoreType = "threatx"
-	VaultStoreType     StoreType = "vault"
+	ACMStoreType          StoreType = "acm"
+	DigitalOceanStoreType StoreType = "digitalocean"
+	GCPStoreType          StoreType = "gcp"
+	HerokuStoreType       StoreType = "heroku"
+	IncapsulaStoreType    StoreType = "incapsula"
+	ThreatxStoreType      StoreType = "threatx"
+	VaultStoreType        StoreType = "vault"
 )
 
 type RemoteStore interface {
@@ -40,6 +42,8 @@ func NewStore(storeType StoreType) (RemoteStore, error) {
 	switch storeType {
 	case ACMStoreType:
 		store = &acm.ACMStore{}
+	case DigitalOceanStoreType:
+		store = &digitalocean.DigitalOceanStore{}
 	case GCPStoreType:
 		store = &gcpcm.GCPStore{}
 	case HerokuStoreType:
@@ -99,6 +103,11 @@ func EnabledStores(s *corev1.Secret) []StoreType {
 	if s.Annotations[state.OperatorName+"/heroku-enabled"] == "true" {
 		l.Debug("sync-enabled heroku")
 		stores = append(stores, HerokuStoreType)
+	}
+	// if there is a digitalocean-enabled = true annotation, add digitalocean to the list of stores
+	if s.Annotations[state.OperatorName+"/digitalocean-enabled"] == "true" {
+		l.Debug("sync-enabled digitalocean")
+		stores = append(stores, DigitalOceanStoreType)
 	}
 	return stores
 }
