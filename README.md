@@ -11,6 +11,7 @@ Enable Kubernetes `cert-manager` to sync TLS certificates to AWS ACM, GCP, Hashi
     - [AWS ACM](#aws-acm)
     - [Cloudflare](#cloudflare)
     - [DigitalOcean](#digitalocean)
+    - [Filepath](#filepath)
     - [Google Cloud](#google-cloud)
     - [HashiCorp Vault](#hashicorp-vault)
     - [Heroku](#heroku)
@@ -105,6 +106,19 @@ Annotations:
     cert-manager-sync.lestak.sh/digitalocean-secret-name: "example-digitalocean-secret" # secret in same namespace which contains the digitalocean api key. If provided in format "namespace/secret-name", will look in that namespace for the secret
     cert-manager-sync.lestak.sh/digitalocean-cert-name: "my-cert" # unique name to give your cert in DigitalOcean
     cert-manager-sync.lestak.sh/digitalocean-cert-id: "" # will be auto-filled by operator for in-place renewals
+```
+
+### Filepath
+
+If you want to store the certs in a directory mounted to the operator, you can use the `filepath` sync method. This is useful for storing certs in a shared volume that can be mounted on systems which do not support other sync methods.
+
+Annotations:
+
+```yaml
+    cert-manager-sync.lestak.sh/filepath-enabled: "true" # sync certificate to filepath
+    cert-manager-sync.lestak.sh/filepath-dir: "/path/to/certs" # directory to store cert
+    cert-manager-sync.lestak.sh/filepath-cert: "example.com.crt" # filename to store cert, default is "tls.crt"
+    cert-manager-sync.lestak.sh/filepath-key: "example.com.key" # filename to store key, default is "tls.key"
 ```
 
 ### Google Cloud
@@ -242,6 +256,10 @@ metadata:
     cert-manager-sync.lestak.sh/digitalocean-secret-name: "example-digitalocean-secret" # secret in same namespace which contains the digitalocean api key. If provided in format "namespace/secret-name", will look in that namespace for the secret
     cert-manager-sync.lestak.sh/digitalocean-cert-name: "my-cert" # unique name to give your cert in DigitalOcean
     cert-manager-sync.lestak.sh/digitalocean-cert-id: "" # will be auto-filled by operator for in-place renewals
+    cert-manager-sync.lestak.sh/filepath-enabled: "true" # sync certificate to filepath
+    cert-manager-sync.lestak.sh/filepath-dir: "/path/to/certs" # directory to store cert
+    cert-manager-sync.lestak.sh/filepath-cert: "example.com.crt" # filename to store cert, default is "tls.crt"
+    cert-manager-sync.lestak.sh/filepath-key: "example.com.key" # filename to store key, default is "tls.key"
     cert-manager-sync.lestak.sh/gcp-enabled: "true" # sync certificate to GCP
     cert-manager-sync.lestak.sh/gcp-location: LOCATION # GCP location to store cert
     cert-manager-sync.lestak.sh/gcp-project: PROJECT_ID # GCP project to store cert

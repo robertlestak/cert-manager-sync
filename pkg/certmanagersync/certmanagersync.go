@@ -8,6 +8,7 @@ import (
 	"github.com/robertlestak/cert-manager-sync/stores/acm"
 	"github.com/robertlestak/cert-manager-sync/stores/cloudflare"
 	"github.com/robertlestak/cert-manager-sync/stores/digitalocean"
+	"github.com/robertlestak/cert-manager-sync/stores/filepath"
 	"github.com/robertlestak/cert-manager-sync/stores/gcpcm"
 	"github.com/robertlestak/cert-manager-sync/stores/heroku"
 	"github.com/robertlestak/cert-manager-sync/stores/incapsula"
@@ -23,6 +24,7 @@ const (
 	ACMStoreType          StoreType = "acm"
 	CloudflareStoreType   StoreType = "cloudflare"
 	DigitalOceanStoreType StoreType = "digitalocean"
+	FilepathStoreType     StoreType = "filepath"
 	GCPStoreType          StoreType = "gcp"
 	HerokuStoreType       StoreType = "heroku"
 	IncapsulaStoreType    StoreType = "incapsula"
@@ -48,6 +50,8 @@ func NewStore(storeType StoreType) (RemoteStore, error) {
 		store = &cloudflare.CloudflareStore{}
 	case DigitalOceanStoreType:
 		store = &digitalocean.DigitalOceanStore{}
+	case FilepathStoreType:
+		store = &filepath.FilepathStore{}
 	case GCPStoreType:
 		store = &gcpcm.GCPStore{}
 	case HerokuStoreType:
@@ -92,6 +96,11 @@ func EnabledStores(s *corev1.Secret) []StoreType {
 	if s.Annotations[state.OperatorName+"/digitalocean-enabled"] == "true" {
 		l.Debug("sync-enabled digitalocean")
 		stores = append(stores, DigitalOceanStoreType)
+	}
+	// if there is a filepath-enabled = true annotation, add filepath to the list of stores
+	if s.Annotations[state.OperatorName+"/filepath-enabled"] == "true" {
+		l.Debug("sync-enabled filepath")
+		stores = append(stores, FilepathStoreType)
 	}
 	// if there is a gcp-enabled = true annotation, add gcp to the list of stores
 	if s.Annotations[state.OperatorName+"/gcp-enabled"] == "true" {
