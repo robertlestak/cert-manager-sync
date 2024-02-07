@@ -47,7 +47,7 @@ func (s *GCPStore) secretToGCPCert(secret *corev1.Secret) *certificatemanagerpb.
 		PemPrivateKey:  string(secret.Data["tls.key"]),
 	}
 	if s.CertificateName == "" {
-		s.CertificateName = "projects/" + s.ProjectID + "/locations/" + s.Location + "certificates/" + secret.ObjectMeta.Namespace + "-" + secret.ObjectMeta.Name
+		s.CertificateName = "projects/" + s.ProjectID + "/locations/" + s.Location + "/certificates/" + secret.ObjectMeta.Namespace + "-" + secret.ObjectMeta.Name
 	}
 	return &certificatemanagerpb.Certificate{
 		Name: s.CertificateName,
@@ -88,7 +88,7 @@ func (s *GCPStore) CreateCert(ctx context.Context, gcert *certificatemanagerpb.C
 		// TODO: Fill request struct fields.
 		// See https://pkg.go.dev/google.golang.org/genproto/googleapis/cloud/certificatemanager/v1#CreateCertificateRequest.
 		Parent:        "projects/" + s.ProjectID + "/locations/" + s.Location,
-		CertificateId: s.CertificateName,
+		CertificateId: strings.Split(s.CertificateName, "/")[5],
 		Certificate:   gcert,
 	}
 	op, err := s.client.CreateCertificate(ctx, req)
@@ -164,7 +164,7 @@ func (s *GCPStore) Update(secret *corev1.Secret) error {
 	}
 	s.client = client
 	// if there is no secret name, this is the first time we are sending to GCP, create
-	if s.CertificateName == "" {
+	if secret.ObjectMeta.Annotations[state.OperatorName+"/gcp-certificate-name"] == "" {
 		err = s.CreateCert(ctx, gcert)
 		if err != nil {
 			l.WithError(err).Errorf("vault.WriteSecret error")
