@@ -17,6 +17,7 @@ Enable Kubernetes `cert-manager` to sync TLS certificates to AWS ACM, GCP, Hashi
     - [Heroku](#heroku)
     - [Incapsula](#incapsula)
     - [ThreatX](#threatx)
+  - [Exponential backoff after a failed sync](#exponential-backoff-after-a-failed-sync)
   - [Configuration](#configuration)
   - [Deployment](#deployment)
 
@@ -227,6 +228,16 @@ Annotations:
     cert-manager-sync.lestak.sh/threatx-secret-name: "example-threatx-api-secret" # secret in same namespace which contains the threatx api key. If provided in format "namespace/secret-name", will look in that namespace for the secret
 ```
 
+## Exponential backoff after a failed sync
+
+Previously, a failed sync will be retried every `60s` which — especially in larger cert-manager installations — could cause rate limits to be hit as well as overwhelm external services. Failed attempts are now retried with a binary exponential backoff starting with `60s` then `120s`, `240s` up to a maximum of `32h`. As part of the new backoff behavior, a new `cert-manager-sync.lestak.sh/failed-sync-attempts` field was added to the `cert-manager-sync` Secret annotations to track the number of currently failed issuances.
+
+By default, the operator will continue to retry indefinitely until the sync is successful, or the sync annotation is removed. If you would like to limit the number of retries, you can set the `cert-manager-sync.lestak.sh/max-sync-attempts` annotation to the number of retries you would like to allow.
+
+```yaml
+    cert-manager-sync.lestak.sh/max-sync-attempts: "5" # limit the number of retries to 5, after which you will need to manually resolve the underlying issue and reset/remove the failed-sync-attempts annotation
+```
+
 ## Configuration
 
 The operator uses Kubernetes annotations to define the sync locations and configurations.
@@ -278,6 +289,8 @@ metadata:
     cert-manager-sync.lestak.sh/vault-role: "role-name" # HashiCorp Vault role name
     cert-manager-sync.lestak.sh/vault-auth-method: "auth-method" # HashiCorp Vault auth method name
     cert-manager-sync.lestak.sh/vault-path: "kv-name/path/to/secret" # HashiCorp Vault path to store cert
+    cert-manager-sync.lestak.sh/max-sync-attempts: "5" # limit the number of retries to 5, after which you will need to manually resolve the underlying issue and reset/remove the failed-sync-attempts annotation
+    cert-manager-sync.lestak.sh/failed-sync-attempts: "0" # number of failed sync attempts, will be auto-filled by operator
 data:
   tls.crt: ""
   tls.key: ""

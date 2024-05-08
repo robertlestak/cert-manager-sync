@@ -1,6 +1,6 @@
 module github.com/robertlestak/cert-manager-sync
 
-go 1.18
+go 1.22.0
 
 require (
 	cloud.google.com/go/certificatemanager v1.6.0
@@ -12,6 +12,7 @@ require (
 	github.com/heroku/heroku-go/v5 v5.5.0
 	github.com/sirupsen/logrus v1.8.1
 	golang.org/x/oauth2 v0.5.0
+	google.golang.org/api v0.110.0
 	google.golang.org/genproto v0.0.0-20230209215440-0dfe4f8abfcc
 	k8s.io/api v0.24.0
 	k8s.io/apimachinery v0.24.0
@@ -93,7 +94,6 @@ require (
 	golang.org/x/term v0.15.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
 	golang.org/x/time v0.5.0 // indirect
-	google.golang.org/api v0.110.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
 	google.golang.org/grpc v1.53.0 // indirect
 	google.golang.org/protobuf v1.28.1 // indirect

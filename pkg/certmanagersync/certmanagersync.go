@@ -1,8 +1,10 @@
 package certmanagersync
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/robertlestak/cert-manager-sync/pkg/state"
 	"github.com/robertlestak/cert-manager-sync/stores/acm"
@@ -16,6 +18,7 @@ import (
 	"github.com/robertlestak/cert-manager-sync/stores/vault"
 	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type StoreType string
@@ -42,7 +45,6 @@ func NewStore(storeType StoreType) (RemoteStore, error) {
 	})
 	l.Debugf("NewStore %s", storeType)
 	var store RemoteStore
-	var err error
 	switch storeType {
 	case ACMStoreType:
 		store = &acm.ACMStore{}
@@ -65,11 +67,90 @@ func NewStore(storeType StoreType) (RemoteStore, error) {
 	default:
 		return nil, errors.New("invalid store type")
 	}
-	if err != nil {
-		l.WithError(err).Errorf("vault.NewStore error")
-		return nil, err
-	}
 	return store, nil
+}
+
+// maxRetries returns the max number of sync attempts allowed for a secret
+// if the secret has a max-sync-attempts annotation
+// if the annotation is not present, -1 is returned, indicating unlimited retries
+func maxRetries(s *corev1.Secret) int {
+	l := log.WithFields(log.Fields{
+		"action": "maxRetries",
+	})
+	l.Debugf("maxRetries %s", s.Name)
+	if s.Annotations[state.OperatorName+"/max-sync-attempts"] != "" {
+		iv, err := strconv.ParseInt(s.Annotations[state.OperatorName+"/max-sync-attempts"], 10, 64)
+		if err != nil {
+			l.WithError(err).Errorf("ParseInt error")
+			return -1
+		}
+		return int(iv)
+	}
+	return -1
+}
+
+// consumedRetries returns the number of sync attempts that have been made for a secret
+// if the secret has a failed-sync-attempts annotation
+// if the annotation is not present, 0 is returned, indicating no retries have been made
+func consumedRetries(s *corev1.Secret) int {
+	l := log.WithFields(log.Fields{
+		"action": "consumedRetries",
+	})
+	l.Debugf("consumedRetries %s", s.Name)
+	if s.Annotations[state.OperatorName+"/failed-sync-attempts"] != "" {
+		iv, err := strconv.ParseInt(s.Annotations[state.OperatorName+"/failed-sync-attempts"], 10, 64)
+		if err != nil {
+			l.WithError(err).Errorf("ParseInt error")
+			return 0
+		}
+		return int(iv)
+	}
+	return 0
+}
+
+func incrementRetries(secretNamespace, secretName string) error {
+	l := log.WithFields(log.Fields{
+		"action": "incrementRetries",
+	})
+	l.Debugf("incrementRetries %s/%s", secretNamespace, secretName)
+	// get the secret from k8s, since we don't know if data has been changed by a store
+	gopt := metav1.GetOptions{}
+	secret, err := state.KubeClient.CoreV1().Secrets(secretNamespace).Get(context.Background(), secretName, gopt)
+	if err != nil {
+		l.WithError(err).Errorf("Get error")
+		return err
+	}
+	// increment the failed-sync-attempts annotation
+	iv := consumedRetries(secret) + 1
+	secret.Annotations[state.OperatorName+"/failed-sync-attempts"] = strconv.Itoa(iv)
+	_, err = state.KubeClient.CoreV1().Secrets(secretNamespace).Update(context.Background(), secret, metav1.UpdateOptions{})
+	if err != nil {
+		l.WithError(err).Errorf("Update error")
+		return err
+	}
+	return nil
+}
+
+func resetRetries(secretNamespace, secretName string) error {
+	l := log.WithFields(log.Fields{
+		"action": "resetRetries",
+	})
+	l.Debugf("resetRetries %s/%s", secretNamespace, secretName)
+	// get the secret from k8s, since we don't know if data has been changed by a store
+	gopt := metav1.GetOptions{}
+	secret, err := state.KubeClient.CoreV1().Secrets(secretNamespace).Get(context.Background(), secretName, gopt)
+	if err != nil {
+		l.WithError(err).Errorf("Get error")
+		return err
+	}
+	// remove the failed-sync-attempts annotation
+	delete(secret.Annotations, state.OperatorName+"/failed-sync-attempts")
+	_, err = state.KubeClient.CoreV1().Secrets(secretNamespace).Update(context.Background(), secret, metav1.UpdateOptions{})
+	if err != nil {
+		l.WithError(err).Errorf("Update error")
+		return err
+	}
+	return nil
 }
 
 func EnabledStores(s *corev1.Secret) []StoreType {
@@ -152,6 +233,13 @@ func HandleSecret(s *corev1.Secret) error {
 		"action": "HandleSecret",
 	})
 	l.Debugf("HandleSecret %s", s.Name)
+	// ensure we haven't exceeded the allotted retries
+	maxR := maxRetries(s)
+	consumedR := consumedRetries(s)
+	if maxR != -1 && consumedR >= maxR {
+		l.Errorf("max retries reached")
+		return nil
+	}
 	// get the list of stores enabled for this secret
 	stores := EnabledStores(s)
 	if len(stores) == 0 {
@@ -182,7 +270,16 @@ func HandleSecret(s *corev1.Secret) error {
 		}
 	}
 	if len(errs) > 0 {
+		// increment the failed-sync-attempts annotation
+		if err := incrementRetries(s.Namespace, s.Name); err != nil {
+			l.WithError(err).Errorf("incrementRetries error")
+		}
 		return fmt.Errorf("errors syncing secret %s/%s to stores: %v", s.Namespace, s.Name, errs)
+	} else {
+		// reset the failed-sync-attempts annotation
+		if err := resetRetries(s.Namespace, s.Name); err != nil {
+			l.WithError(err).Errorf("resetRetries error")
+		}
 	}
 	// if the sync was a success, add the secret to the cache
 	state.AddToCache(s)
