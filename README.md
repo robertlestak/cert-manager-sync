@@ -230,12 +230,18 @@ Annotations:
 
 ## Exponential backoff after a failed sync
 
-Previously, a failed sync will be retried every `60s` which — especially in larger cert-manager installations — could cause rate limits to be hit as well as overwhelm external services. Failed attempts are now retried with a binary exponential backoff starting with `60s` then `120s`, `240s` up to a maximum of `32h`. As part of the new backoff behavior, a new `cert-manager-sync.lestak.sh/failed-sync-attempts` field was added to the `cert-manager-sync` Secret annotations to track the number of currently failed issuances.
+Previously, a failed sync will be retried every `60s` which — especially in larger installations — could cause rate limits to be hit as well as overwhelm external services. Failed attempts are now retried with a binary exponential backoff starting with `60s` then `120s`, `240s` up to a maximum of `32h`. As part of the new backoff behavior, new `cert-manager-sync.lestak.sh/failed-sync-attempts` and `cert-manager-sync.lestak.sh/next-retry`, and `cert-manager-sync.lestak.sh/max-sync-attempts` fields were added to the `cert-manager-sync` Secret annotations to track the number of currently failed syncs and when the next retry will be attempted.
 
 By default, the operator will continue to retry indefinitely until the sync is successful, or the sync annotation is removed. If you would like to limit the number of retries, you can set the `cert-manager-sync.lestak.sh/max-sync-attempts` annotation to the number of retries you would like to allow.
 
 ```yaml
     cert-manager-sync.lestak.sh/max-sync-attempts: "5" # limit the number of retries to 5, after which you will need to manually resolve the underlying issue and reset/remove the failed-sync-attempts annotation
+```
+
+If your sync gets put into a backoff and you've made the required changes and want to immediately retry, you can remove the `cert-manager-sync.lestak.sh/next-retry` annotation. This will cause the operator to immediately retry the sync.
+
+```yaml
+    cert-manager-sync.lestak.sh/next-retry: "2022-01-01T00:00:00Z" # next retry time (RFC3339), will be auto-filled by operator. Remove this if you want to retry immediately.
 ```
 
 ## Configuration
@@ -291,6 +297,7 @@ metadata:
     cert-manager-sync.lestak.sh/vault-path: "kv-name/path/to/secret" # HashiCorp Vault path to store cert
     cert-manager-sync.lestak.sh/max-sync-attempts: "5" # limit the number of retries to 5, after which you will need to manually resolve the underlying issue and reset/remove the failed-sync-attempts annotation
     cert-manager-sync.lestak.sh/failed-sync-attempts: "0" # number of failed sync attempts, will be auto-filled by operator
+    cert-manager-sync.lestak.sh/next-retry: "2022-01-01T00:00:00Z" # next retry time (RFC3339), will be auto-filled by operator. Remove this if you want to retry immediately.
 data:
   tls.crt: ""
   tls.key: ""

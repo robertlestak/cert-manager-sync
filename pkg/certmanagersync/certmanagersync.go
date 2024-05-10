@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/robertlestak/cert-manager-sync/pkg/state"
 	"github.com/robertlestak/cert-manager-sync/stores/acm"
@@ -108,6 +109,52 @@ func consumedRetries(s *corev1.Secret) int {
 	return 0
 }
 
+// nextRetryTime returns the time when the next sync attempt should be made
+// it will return zero time if the secret has not exceeded the max retries
+func nextRetryTime(s *corev1.Secret) time.Time {
+	l := log.WithFields(log.Fields{
+		"action":    "nextRetryTime",
+		"namespace": s.Namespace,
+		"name":      s.Name,
+	})
+	l.Debug("nextRetryTime")
+	if s.Annotations[state.OperatorName+"/next-retry"] != "" {
+		t, err := time.Parse(time.RFC3339, s.Annotations[state.OperatorName+"/next-retry"])
+		if err != nil {
+			l.WithError(err).Errorf("Parse error")
+			return time.Time{}
+		}
+		l = l.WithFields(log.Fields{
+			"next-retry": t,
+		})
+		l.Debugf("nextRetryTime %s", t)
+		return t
+	}
+	return time.Time{}
+}
+
+func readyToRetry(s *corev1.Secret) bool {
+	l := log.WithFields(log.Fields{
+		"action": "readyToRetry",
+	})
+	l.Debugf("readyToRetry %s", s.Name)
+	maxR := maxRetries(s)
+	// if the secret has exceeded the max retries, return false
+	consumedR := consumedRetries(s)
+	if maxR != -1 && consumedR >= maxR {
+		l.Errorf("max retries reached")
+		return false
+	}
+	// if the secret is ready to retry, return true
+	nextR := nextRetryTime(s)
+	if nextR.IsZero() || time.Now().After(nextR) {
+		l.Debugf("ready to retry")
+		return true
+	}
+	// otherwise, return false
+	return false
+}
+
 func incrementRetries(secretNamespace, secretName string) error {
 	l := log.WithFields(log.Fields{
 		"action": "incrementRetries",
@@ -123,11 +170,27 @@ func incrementRetries(secretNamespace, secretName string) error {
 	// increment the failed-sync-attempts annotation
 	iv := consumedRetries(secret) + 1
 	secret.Annotations[state.OperatorName+"/failed-sync-attempts"] = strconv.Itoa(iv)
+	// set the next-retry annotation to the current time plus the delay
+	// the delay is a binary exponential backoff, starting at 1 minute, then 2, 4, 8.. up to 32 hours
+	delay := time.Duration(1<<uint(iv-1)) * time.Minute
+	if delay > 32*time.Hour {
+		delay = 32 * time.Hour
+	}
+	nextRetry := time.Now().Add(delay).Format(time.RFC3339)
+	l = l.WithFields(log.Fields{
+		"failed-sync-attempts": iv,
+		"next-retry":           nextRetry,
+	})
+	// add the next-retry annotation to the secret
+	// this will be evaluated by the readyToRetry function
+	// when the next sync attempt is made
+	secret.Annotations[state.OperatorName+"/next-retry"] = nextRetry
 	_, err = state.KubeClient.CoreV1().Secrets(secretNamespace).Update(context.Background(), secret, metav1.UpdateOptions{})
 	if err != nil {
 		l.WithError(err).Errorf("Update error")
 		return err
 	}
+	l.Debugf("incremented retries")
 	return nil
 }
 
@@ -145,6 +208,8 @@ func resetRetries(secretNamespace, secretName string) error {
 	}
 	// remove the failed-sync-attempts annotation
 	delete(secret.Annotations, state.OperatorName+"/failed-sync-attempts")
+	// remove the next-retry annotation
+	delete(secret.Annotations, state.OperatorName+"/next-retry")
 	_, err = state.KubeClient.CoreV1().Secrets(secretNamespace).Update(context.Background(), secret, metav1.UpdateOptions{})
 	if err != nil {
 		l.WithError(err).Errorf("Update error")
@@ -230,14 +295,14 @@ func SyncSecretToStore(secret *corev1.Secret, store StoreType) error {
 
 func HandleSecret(s *corev1.Secret) error {
 	l := log.WithFields(log.Fields{
-		"action": "HandleSecret",
+		"action":    "HandleSecret",
+		"namespace": s.Namespace,
+		"name":      s.Name,
 	})
-	l.Debugf("HandleSecret %s", s.Name)
+	l.Debugf("HandleSecret %s/%s", s.Namespace, s.Name)
 	// ensure we haven't exceeded the allotted retries
-	maxR := maxRetries(s)
-	consumedR := consumedRetries(s)
-	if maxR != -1 && consumedR >= maxR {
-		l.Errorf("max retries reached")
+	if !readyToRetry(s) {
+		l.Debug("not ready to retry")
 		return nil
 	}
 	// get the list of stores enabled for this secret

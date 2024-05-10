@@ -48,9 +48,6 @@ func main() {
 	)
 	l.Info("starting cert-manager-sync")
 	// main loop
-	origLoopDelay := time.Duration(time.Second * 60)
-	loopDelay := origLoopDelay
-	maxLoopDelay := time.Duration(time.Hour * 32)
 	for {
 		l.Debug("main loop")
 		// if namespace is not specified all namespaces will be searched
@@ -82,22 +79,10 @@ func main() {
 			}
 		}
 		if errCount > 0 {
-			// double the loop delay if there are errors
-			loopDelay = loopDelay * 2
-			if loopDelay > maxLoopDelay {
-				l.Warnf("max loop delay reached")
-				loopDelay = maxLoopDelay
-			}
 			l.WithFields(log.Fields{
-				"errCount":  errCount,
-				"loopDelay": loopDelay,
-				"nextRun":   time.Now().Add(loopDelay).Format(time.RFC3339),
+				"errCount": errCount,
 			}).Error("sync errors occurred")
-		} else {
-			// reset the loop delay if there are no errors
-			loopDelay = origLoopDelay
-			l.Debug("sync successful")
 		}
-		time.Sleep(loopDelay)
+		time.Sleep(60 * time.Second)
 	}
 }
