@@ -77,9 +77,7 @@ func (s *IncapsulaStore) UploadIncapsulaCert(cert *tlssecret.Certificate) error 
 	c := http.Client{}
 	iurl := os.Getenv("INCAPSULA_API") + "/sites/customCertificate/upload"
 	data := url.Values{}
-	data.Set("api_id", s.ID)
 	data.Set("site_id", s.SiteID)
-	data.Set("api_key", s.Key)
 	data.Set("certificate", bCert)
 	data.Set("private_key", bKey)
 	d := strings.NewReader(data.Encode())
@@ -89,6 +87,8 @@ func (s *IncapsulaStore) UploadIncapsulaCert(cert *tlssecret.Certificate) error 
 		l.WithError(rerr).Errorf("http.NewRequest error")
 		return rerr
 	}
+	req.Header.Set("x-api-id", s.ID)
+	req.Header.Set("x-api-key", s.Key)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	res, serr := c.Do(req)
 	if serr != nil {
@@ -127,9 +127,7 @@ func (s *IncapsulaStore) GetIncapsulaSiteStatus() (string, error) {
 	iurl := os.Getenv("INCAPSULA_API") + "/sites/status"
 	c := http.Client{}
 	data := url.Values{}
-	data.Set("api_id", s.ID)
 	data.Set("site_id", s.SiteID)
-	data.Set("api_key", s.Key)
 	data.Set("tests", "services")
 	d := strings.NewReader(data.Encode())
 	l.Debugf("url=%s data=%s", iurl, data.Encode())
@@ -138,6 +136,8 @@ func (s *IncapsulaStore) GetIncapsulaSiteStatus() (string, error) {
 		l.WithError(rerr).Errorf("http.NewRequest error")
 		return "", rerr
 	}
+	req.Header.Set("x-api-id", s.ID)
+	req.Header.Set("x-api-key", s.Key)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	res, serr := c.Do(req)
 	if serr != nil {
