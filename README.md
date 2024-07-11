@@ -244,6 +244,10 @@ If your sync gets put into a backoff and you've made the required changes and wa
     cert-manager-sync.lestak.sh/next-retry: "2022-01-01T00:00:00Z" # next retry time (RFC3339), will be auto-filled by operator. Remove this if you want to retry immediately.
 ```
 
+```bash
+kubectl -n cert-manager annotate secret secret-name cert-manager-sync.lestak.sh/next-retry- --overwrite
+```
+
 ## Configuration
 
 The operator uses Kubernetes annotations to define the sync locations and configurations.
