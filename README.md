@@ -245,7 +245,10 @@ If your sync gets put into a backoff and you've made the required changes and wa
 ```
 
 ```bash
-kubectl -n cert-manager annotate secret secret-name cert-manager-sync.lestak.sh/next-retry- --overwrite
+kubectl -n cert-manager \
+	annotate secret secret-name \
+	cert-manager-sync.lestak.sh/next-retry- \
+	--overwrite
 ```
 
 ## Configuration
