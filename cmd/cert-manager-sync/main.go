@@ -8,6 +8,8 @@ import (
 	"github.com/robertlestak/cert-manager-sync/pkg/state"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/informers"
+	"k8s.io/client-go/tools/cache"
 )
 
 func init() {
@@ -30,16 +32,6 @@ func init() {
 	}
 }
 
-func secretWorker(jobs chan v1.Secret, results chan error) {
-	for s := range jobs {
-		if err := certmanagersync.HandleSecret(&s); err != nil {
-			results <- err
-			continue
-		}
-		results <- nil
-	}
-}
-
 func main() {
 	l := log.WithFields(
 		log.Fields{
@@ -47,42 +39,40 @@ func main() {
 		},
 	)
 	l.Info("starting cert-manager-sync")
-	// main loop
-	for {
-		l.Debug("main loop")
-		// if namespace is not specified all namespaces will be searched
-		// assuming the operator has the correct permissions
-		namespace := os.Getenv("SECRETS_NAMESPACE")
-		secrets, serr := state.GetSecrets(namespace)
-		if serr != nil {
-			l.Fatal(serr)
-		}
-		workerCount := 10
-		if len(secrets) < workerCount {
-			workerCount = len(secrets)
-		}
-		jobs := make(chan v1.Secret, len(secrets))
-		results := make(chan error, len(secrets))
-		for w := 1; w <= workerCount; w++ {
-			go secretWorker(jobs, results)
-		}
-		for _, s := range secrets {
-			jobs <- s
-		}
-		close(jobs)
-		errCount := 0
-		for a := 1; a <= len(secrets); a++ {
-			err := <-results
-			if err != nil {
-				l.Error(err)
-				errCount++
+	factory := informers.NewSharedInformerFactory(state.KubeClient, 30*time.Second)
+	secretInformer := factory.Core().V1().Secrets().Informer()
+
+	stopper := make(chan struct{})
+	defer close(stopper)
+
+	secretInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			s := obj.(*v1.Secret)
+			if !state.SecretWatched(s) {
+				return
 			}
-		}
-		if errCount > 0 {
-			l.WithFields(log.Fields{
-				"errCount": errCount,
-			}).Error("sync errors occurred")
-		}
-		time.Sleep(60 * time.Second)
+			if err := certmanagersync.HandleSecret(s); err != nil {
+				l.Error(err)
+			}
+		},
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			s := newObj.(*v1.Secret)
+			if !state.SecretWatched(s) {
+				return
+			}
+			if err := certmanagersync.HandleSecret(s); err != nil {
+				l.Error(err)
+			}
+		},
+	})
+
+	factory.Start(stopper)
+
+	// Wait for the caches to sync
+	if !cache.WaitForCacheSync(stopper, secretInformer.HasSynced) {
+		panic("Timed out waiting for caches to sync")
 	}
+
+	// Run the informer
+	<-stopper
 }

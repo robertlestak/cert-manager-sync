@@ -231,7 +231,7 @@ Annotations:
 
 ## Exponential backoff after a failed sync
 
-Previously, a failed sync will be retried every `60s` which — especially in larger installations — could cause rate limits to be hit as well as overwhelm external services. Failed attempts are now retried with a binary exponential backoff starting with `60s` then `120s`, `240s` up to a maximum of `32h`. As part of the new backoff behavior, new `cert-manager-sync.lestak.sh/failed-sync-attempts` and `cert-manager-sync.lestak.sh/next-retry`, and `cert-manager-sync.lestak.sh/max-sync-attempts` fields were added to the `cert-manager-sync` Secret annotations to track the number of currently failed syncs and when the next retry will be attempted.
+Previously, a failed sync will be retried every `60s` which — especially in larger installations — could cause rate limits to be hit as well as overwhelm external services. Failed attempts are now retried with a binary exponential backoff starting with `60s` then `120s`, `240s` up to a maximum of `32h`. As part of the new backoff behavior, new `cert-manager-sync.lestak.sh/failed-sync-attempts`, `cert-manager-sync.lestak.sh/next-retry`, and `cert-manager-sync.lestak.sh/max-sync-attempts` fields were added to the `cert-manager-sync` Secret annotations to track the number of currently failed syncs and when the next retry will be attempted.
 
 By default, the operator will continue to retry indefinitely until the sync is successful, or the sync annotation is removed. If you would like to limit the number of retries, you can set the `cert-manager-sync.lestak.sh/max-sync-attempts` annotation to the number of retries you would like to allow.
 
@@ -284,7 +284,7 @@ metadata:
     cert-manager-sync.lestak.sh/filepath-enabled: "true" # sync certificate to filepath
     cert-manager-sync.lestak.sh/filepath-dir: "/path/to/certs" # directory to store cert
     cert-manager-sync.lestak.sh/filepath-cert: "example.com.crt" # filename to store cert, default is "tls.crt"
-    cert-manager-sync.lestak.sh/filepath-ca: "example.com.ca.crt" # filename to store cert, default is "ca.crt"
+    cert-manager-sync.lestak.sh/filepath-ca: "example.com.ca.crt" # filename to store ca cert, default is "ca.crt" (if provided)
     cert-manager-sync.lestak.sh/filepath-key: "example.com.key" # filename to store key, default is "tls.key"
     cert-manager-sync.lestak.sh/gcp-enabled: "true" # sync certificate to GCP
     cert-manager-sync.lestak.sh/gcp-location: LOCATION # GCP location to store cert

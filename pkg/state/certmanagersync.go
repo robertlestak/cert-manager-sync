@@ -1,7 +1,6 @@
 package state
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,7 +9,6 @@ import (
 	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
 	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -140,35 +138,24 @@ func CreateKubeClient() error {
 	return nil
 }
 
-// GetSecrets returns all sync-enabled secrets managed by the cert-manager-sync operator
-func GetSecrets(namespace string) ([]corev1.Secret, error) {
-	var slo []corev1.Secret
-	var err error
+func SecretWatched(s *corev1.Secret) bool {
 	l := log.WithFields(
 		log.Fields{
-			"action": "getSecrets",
-		},
-	)
-	l.Debugf("getSecrets")
-	sc := KubeClient.CoreV1().Secrets(namespace)
-	lo := &metav1.ListOptions{}
-	sl, jerr := sc.List(context.Background(), *lo)
-	if jerr != nil {
-		l.WithError(jerr).Errorf("secret.List error")
-		return slo, jerr
+			"action":    "secretWatched",
+			"secret":    s.ObjectMeta.Name,
+			"namespace": s.ObjectMeta.Namespace,
+		})
+	if s.Annotations[OperatorName+"/sync-enabled"] != "true" {
+		return false
 	}
-	l.Debugf("range secrets: %d", len(sl.Items))
-	for _, s := range sl.Items {
-		l.Debugf("secret=%s/%s labels=%v annotations=%v", s.ObjectMeta.Namespace, s.ObjectMeta.Name, s.ObjectMeta.Labels, s.ObjectMeta.Annotations)
-		if len(s.Data["tls.crt"]) == 0 || len(s.Data["tls.key"]) == 0 {
-			l.Debug("skipping secret without tls.crt or tls.key")
-			continue
-		}
-		if s.Annotations[OperatorName+"/sync-enabled"] == "true" {
-			l.Debugf("cert secret found: %s", s.ObjectMeta.Name)
-			slo = append(slo, s)
-		}
+	if os.Getenv("SECRETS_NAMESPACE") != "" && s.Namespace != os.Getenv("SECRETS_NAMESPACE") {
+		l.Debugf("skipping secret in different namespace: %s", s.Namespace)
+		return false
 	}
-	l.Debugf("returning %d enabled secrets", len(slo))
-	return slo, err
+	if len(s.Data["tls.crt"]) == 0 || len(s.Data["tls.key"]) == 0 {
+		l.Debug("skipping secret without tls.crt or tls.key")
+		return false
+	}
+	l.Debug("returning true")
+	return true
 }
