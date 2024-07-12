@@ -109,7 +109,7 @@ func (s *IncapsulaStore) UploadIncapsulaCert(cert *tlssecret.Certificate) error 
 	l.Debugf("incapsula statusCode=%d response=%v", res.StatusCode, string(bd))
 	if ir.Res != 0 {
 		l.Debugf("status=%v body=%s", res.StatusCode, string(bd))
-		return fmt.Errorf("incapsula upload failed, body=%s", string(bd))
+		return fmt.Errorf("incapsula upload failed, incapsulaSecretNamespace=%s incapsulaSecret=%s body=%s", s.SecretNamespace, s.SecretName, string(bd))
 	}
 	l.Debugf("incapsula response=%v", string(bd))
 	return err
