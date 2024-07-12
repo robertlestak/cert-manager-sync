@@ -15,6 +15,10 @@ spec:
       version: v1
   template:
     metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
       labels:
         app: cert-manager-sync
         version: v1
@@ -25,15 +29,13 @@ spec:
       containers:
         - image: robertlestak/cert-manager-sync:latest
           name: cert-manager-sync
-          env:
-            - name: INCAPSULA_API
-              value: "https://my.imperva.com/api/prov/v1"
-            - name: SECRETS_NAMESPACE
-              value: cert-manager
-            - name: AWS_REGION
-              value: us-east-1
-            - name: OPERATOR_NAME
-              value: "cert-manager-sync.lestak.sh"
+          envFrom:
+          - secretRef:
+              name: cert-manager-sync
+              optional: true
+          ports:
+          - containerPort: 9090
+            name: http-metrics
           resources:
             limits:
               cpu: 500m

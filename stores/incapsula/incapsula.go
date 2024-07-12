@@ -1,6 +1,7 @@
 package incapsula
 
 import (
+	"cmp"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -24,6 +25,15 @@ type IncapsulaStore struct {
 	Key             string `json:"api_key"`
 	SecretName      string
 	SecretNamespace string
+}
+
+func impervaApiBase() string {
+	fromEnv := os.Getenv("INCAPSULA_API")
+	if fromEnv == "" && os.Getenv("IMPERVA_API") != "" {
+		fromEnv = os.Getenv("IMPERVA_API")
+	}
+	defaultVal := "https://my.imperva.com/api/prov/v1"
+	return cmp.Or(fromEnv, defaultVal)
 }
 
 func (s *IncapsulaStore) GetApiKey(ctx context.Context) error {
@@ -75,7 +85,7 @@ func (s *IncapsulaStore) UploadIncapsulaCert(cert *tlssecret.Certificate) error 
 	bCert := base64.StdEncoding.EncodeToString(cert.FullChain())
 	bKey := base64.StdEncoding.EncodeToString(cert.Key)
 	c := http.Client{}
-	iurl := os.Getenv("INCAPSULA_API") + "/sites/customCertificate/upload"
+	iurl := impervaApiBase() + "/sites/customCertificate/upload"
 	data := url.Values{}
 	data.Set("site_id", s.SiteID)
 	data.Set("certificate", bCert)
@@ -124,7 +134,7 @@ func (s *IncapsulaStore) GetIncapsulaSiteStatus() (string, error) {
 	)
 	l.Debugf("GetIncapsulaSiteStatus")
 	var err error
-	iurl := os.Getenv("INCAPSULA_API") + "/sites/status"
+	iurl := impervaApiBase() + "/sites/status"
 	c := http.Client{}
 	data := url.Values{}
 	data.Set("site_id", s.SiteID)

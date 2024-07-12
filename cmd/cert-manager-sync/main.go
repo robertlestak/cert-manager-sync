@@ -4,6 +4,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/robertlestak/cert-manager-sync/internal/metrics"
 	"github.com/robertlestak/cert-manager-sync/pkg/certmanagersync"
 	"github.com/robertlestak/cert-manager-sync/pkg/state"
 	log "github.com/sirupsen/logrus"
@@ -39,6 +40,9 @@ func main() {
 		},
 	)
 	l.Info("starting cert-manager-sync")
+	if os.Getenv("ENABLE_METRICS") != "false" {
+		go metrics.Serve()
+	}
 	factory := informers.NewSharedInformerFactory(state.KubeClient, 30*time.Second)
 	secretInformer := factory.Core().V1().Secrets().Informer()
 

@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/robertlestak/cert-manager-sync/internal/metrics"
 	"github.com/robertlestak/cert-manager-sync/pkg/state"
 	"github.com/robertlestak/cert-manager-sync/stores/acm"
 	"github.com/robertlestak/cert-manager-sync/stores/cloudflare"
@@ -280,20 +281,24 @@ func EnabledStores(s *corev1.Secret) []StoreType {
 
 func SyncSecretToStore(secret *corev1.Secret, store StoreType) error {
 	l := log.WithFields(log.Fields{
-		"action": "SyncSecretToStore",
-		"store":  store,
-		"secret": fmt.Sprintf("%s/%s", secret.Namespace, secret.Name),
+		"action":    "SyncSecretToStore",
+		"store":     store,
+		"namespace": secret.Namespace,
+		"secret":    secret.Name,
 	})
 	l.Debugf("syncing store %s", store)
 	rs, err := NewStore(store)
 	if err != nil {
-		l.WithError(err).Errorf("NewStore error")
+		l.WithError(err).Error("NewStore error")
+		metrics.SetFailure(secret.Namespace, secret.Name, string(store))
 		return fmt.Errorf("error creating store %s: %v", store, err)
 	}
 	if err := rs.Update(secret); err != nil {
-		l.WithError(err).Errorf("RemoteStore error")
+		l.WithError(err).Error("sync error")
+		metrics.SetFailure(secret.Namespace, secret.Name, string(store))
 		return fmt.Errorf("error syncing secret %s/%s to store %s: %v", secret.Namespace, secret.Name, store, err)
 	}
+	metrics.SetSuccess(secret.Namespace, secret.Name, string(store))
 	return nil
 }
 

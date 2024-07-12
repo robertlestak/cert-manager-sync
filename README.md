@@ -20,6 +20,9 @@ Enable Kubernetes `cert-manager` to sync TLS certificates to AWS ACM, GCP, Hashi
   - [Exponential backoff after a failed sync](#exponential-backoff-after-a-failed-sync)
   - [Configuration](#configuration)
   - [Deployment](#deployment)
+  - [Monitoring](#monitoring)
+    - [Prometheus Metrics](#prometheus-metrics)
+    - [Error Logging](#error-logging)
 
 ## Architecture
 
@@ -343,4 +346,31 @@ If you want to store the certs in different namespaces, modify `SECRETS_NAMESPAC
 
 ```bash
 kubectl apply -f devops/k8s
+```
+
+## Monitoring
+
+### Prometheus Metrics
+
+The operator exposes Prometheus metrics on `/metrics` endpoint. You can use the following query to monitor the sync status:
+
+```promql
+cert_manager_sync_success{namespace="cert-manager",secret="example",store="acm"}
+cert_manager_sync_failure{namespace="cert-manager",secret="example",store="acm"}
+```
+
+Setting `ENABLE_METRICS=false` will disable the metrics server.
+
+### Error Logging
+
+The following log filter will display just errors syncing certificates:
+
+```bash
+level=error action=SyncSecretToStore
+```
+
+The following fields are included in the sync error log message:
+
+```bash
+level=error action=SyncSecretToStore namespace=cert-manager secret=example store=acm error="error message"
 ```
