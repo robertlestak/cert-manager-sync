@@ -311,7 +311,7 @@ func (s *ThreatXStore) Update(secret *corev1.Secret) error {
 		l.Error(err)
 		return err
 	}
-	site.SslBlob = string(cert.Certificate) + string(cert.Key)
+	site.SslBlob = string(cert.FullChain()) + string(cert.Key)
 	site.SslEnabled = true
 	if err := s.UpdateSite(ctx, site); err != nil {
 		l.Error(err)

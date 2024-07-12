@@ -3,6 +3,7 @@ package digitalocean
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/digitalocean/godo"
@@ -57,14 +58,20 @@ func (s *DigitalOceanStore) ParseCertificate(c *tlssecret.Certificate) error {
 	return nil
 }
 
-func separateCertsDO(crt, key []byte) *godo.CertificateRequest {
-	b := "-----BEGIN CERTIFICATE-----\n"
-	str := strings.Split(string(crt), b)
-	nc := b + str[1]
-	ch := b + strings.Join(str[2:], b)
+func separateCertsDO(ca, crt, key []byte) *godo.CertificateRequest {
+	re := regexp.MustCompile(`(?s)(-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----)`)
+	certBlocks := re.FindAllString(string(crt), -1)
+	if len(certBlocks) == 0 {
+		return nil
+	}
+	nc := certBlocks[0]
+	ch := strings.Join(certBlocks[1:], "\n")
+	if len(ca) > 0 {
+		ch += "\n" + string(ca)
+	}
 	im := &godo.CertificateRequest{
-		CertificateChain: string(ch),
-		LeafCertificate:  string(nc),
+		CertificateChain: ch,
+		LeafCertificate:  nc,
 		PrivateKey:       string(key),
 	}
 	return im
@@ -98,7 +105,7 @@ func (s *DigitalOceanStore) Update(secret *corev1.Secret) error {
 	tokenSource := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: s.ApiKey})
 	oauthClient := oauth2.NewClient(context.Background(), tokenSource)
 	client := godo.NewClient(oauthClient)
-	certRequest := separateCertsDO(c.Certificate, c.Key)
+	certRequest := separateCertsDO(c.Ca, c.Certificate, c.Key)
 	certRequest.Name = s.CertName
 	origCertId := s.CertId
 	if s.CertId != "" {

@@ -208,6 +208,10 @@ func (s *VaultStore) Update(secret *corev1.Secret) error {
 		"tls.crt": c.Certificate,
 		"tls.key": c.Key,
 	}
+	// if there is a CA, add it to the secret
+	if len(c.Ca) > 0 {
+		cd["ca.crt"] = c.Ca
+	}
 	_, err = s.WriteSecret(cd)
 	if err != nil {
 		l.WithError(err).Errorf("vault.WriteSecret error")

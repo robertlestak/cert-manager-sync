@@ -91,7 +91,7 @@ func (s *CloudflareStore) Update(secret *corev1.Secret) error {
 		return err
 	}
 	certRequest := cloudflare.ZoneCustomSSLOptions{
-		Certificate: string(c.Certificate),
+		Certificate: string(c.FullChain()),
 		PrivateKey:  string(c.Key),
 	}
 	origCertId := s.CertId

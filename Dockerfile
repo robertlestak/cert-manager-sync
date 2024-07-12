@@ -3,6 +3,9 @@ FROM golang:1.22.0 as builder
 WORKDIR /app
 
 COPY . .
+
+RUN go test ./...
+
 RUN CGO_ENABLED=0 go build -o /app/cert-manager-sync cmd/cert-manager-sync/*.go
 
 FROM alpine:3.6 as alpine

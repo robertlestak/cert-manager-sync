@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -155,11 +156,17 @@ func (s *ACMStore) ParseCertificate(c *tlssecret.Certificate) error {
 }
 
 // separateCertsACM wraps separateCerts and returns an acm ImportCertificateInput Object
-func separateCertsACM(crt, key []byte) *acm.ImportCertificateInput {
-	b := "-----BEGIN CERTIFICATE-----\n"
-	str := strings.Split(string(crt), b)
-	nc := b + str[1]
-	ch := b + strings.Join(str[2:], b)
+func separateCertsACM(ca, crt, key []byte) *acm.ImportCertificateInput {
+	re := regexp.MustCompile(`(?s)(-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----)`)
+	certBlocks := re.FindAllString(string(crt), -1)
+	if len(certBlocks) == 0 {
+		return nil
+	}
+	nc := certBlocks[0]
+	ch := strings.Join(certBlocks[1:], "\n")
+	if len(ca) > 0 {
+		ch += "\n" + string(ca)
+	}
 	im := &acm.ImportCertificateInput{
 		CertificateChain: []byte(ch),
 		Certificate:      []byte(nc),
@@ -175,7 +182,7 @@ func (s *ACMStore) certToACMInput(c *tlssecret.Certificate) (*acm.ImportCertific
 			"secretName": c.SecretName,
 		},
 	)
-	im := separateCertsACM(c.Certificate, c.Key)
+	im := separateCertsACM(c.Ca, c.Certificate, c.Key)
 	if s.CertificateArn == "" {
 		// this is our first time sending to ACM, tag
 		var tags []*acm.Tag

@@ -90,7 +90,7 @@ func (s *HerokuStore) Update(secret *corev1.Secret) error {
 	origCertName := s.CertName
 	if s.CertName == "" {
 		sniOpts := heroku.SniEndpointCreateOpts{
-			CertificateChain: string(c.Certificate),
+			CertificateChain: string(c.FullChain()),
 			PrivateKey:       string(c.Key),
 		}
 		ep, err := client.SniEndpointCreate(ctx, s.AppName, sniOpts)
@@ -102,7 +102,7 @@ func (s *HerokuStore) Update(secret *corev1.Secret) error {
 		s.CertName = ep.Name
 	} else {
 		sniOpts := heroku.SniEndpointUpdateOpts{
-			CertificateChain: string(c.Certificate),
+			CertificateChain: string(c.FullChain()),
 			PrivateKey:       string(c.Key),
 		}
 		ep, err := client.SniEndpointUpdate(ctx, s.AppName, s.CertName, sniOpts)

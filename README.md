@@ -119,6 +119,7 @@ Annotations:
     cert-manager-sync.lestak.sh/filepath-enabled: "true" # sync certificate to filepath
     cert-manager-sync.lestak.sh/filepath-dir: "/path/to/certs" # directory to store cert
     cert-manager-sync.lestak.sh/filepath-cert: "example.com.crt" # filename to store cert, default is "tls.crt"
+    cert-manager-sync.lestak.sh/filepath-ca: "example.com.ca.crt" # filename to store cert, default is "ca.crt"
     cert-manager-sync.lestak.sh/filepath-key: "example.com.key" # filename to store key, default is "tls.key"
 ```
 
@@ -283,6 +284,7 @@ metadata:
     cert-manager-sync.lestak.sh/filepath-enabled: "true" # sync certificate to filepath
     cert-manager-sync.lestak.sh/filepath-dir: "/path/to/certs" # directory to store cert
     cert-manager-sync.lestak.sh/filepath-cert: "example.com.crt" # filename to store cert, default is "tls.crt"
+    cert-manager-sync.lestak.sh/filepath-ca: "example.com.ca.crt" # filename to store cert, default is "ca.crt"
     cert-manager-sync.lestak.sh/filepath-key: "example.com.key" # filename to store key, default is "tls.key"
     cert-manager-sync.lestak.sh/gcp-enabled: "true" # sync certificate to GCP
     cert-manager-sync.lestak.sh/gcp-location: LOCATION # GCP location to store cert

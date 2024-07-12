@@ -72,7 +72,7 @@ func (s *IncapsulaStore) UploadIncapsulaCert(cert *tlssecret.Certificate) error 
 	)
 	l.Debugf("UploadIncapsulaCert")
 	var err error
-	bCert := base64.StdEncoding.EncodeToString(cert.Certificate)
+	bCert := base64.StdEncoding.EncodeToString(cert.FullChain())
 	bKey := base64.StdEncoding.EncodeToString(cert.Key)
 	c := http.Client{}
 	iurl := os.Getenv("INCAPSULA_API") + "/sites/customCertificate/upload"

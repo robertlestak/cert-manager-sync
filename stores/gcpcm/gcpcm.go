@@ -42,8 +42,9 @@ func (s *GCPStore) GetApiKey(ctx context.Context) error {
 
 // secretToGCPInput converts a k8s secret to a properly-formatted GCP Import object
 func (s *GCPStore) secretToGCPCert(secret *corev1.Secret) *certificatemanagerpb.Certificate {
+	fullChain := tlssecret.ParseSecret(secret).FullChain()
 	sm_cert := &certificatemanagerpb.Certificate_SelfManagedCertificate{
-		PemCertificate: string(secret.Data["tls.crt"]),
+		PemCertificate: string(fullChain),
 		PemPrivateKey:  string(secret.Data["tls.key"]),
 	}
 	if s.CertificateName == "" {
