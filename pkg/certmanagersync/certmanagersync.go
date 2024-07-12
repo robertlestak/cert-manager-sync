@@ -158,6 +158,7 @@ func readyToRetry(s *corev1.Secret) bool {
 func incrementRetries(secretNamespace, secretName string) error {
 	l := log.WithFields(log.Fields{
 		"action": "incrementRetries",
+		"secret": fmt.Sprintf("%s/%s", secretNamespace, secretName),
 	})
 	l.Debugf("incrementRetries %s/%s", secretNamespace, secretName)
 	// get the secret from k8s, since we don't know if data has been changed by a store
@@ -187,7 +188,7 @@ func incrementRetries(secretNamespace, secretName string) error {
 	secret.Annotations[state.OperatorName+"/next-retry"] = nextRetry
 	_, err = state.KubeClient.CoreV1().Secrets(secretNamespace).Update(context.Background(), secret, metav1.UpdateOptions{})
 	if err != nil {
-		l.WithError(err).Errorf("Update error")
+		l.WithError(err).Errorf("Update secret error")
 		return err
 	}
 	l.Debugf("incremented retries")
@@ -197,6 +198,7 @@ func incrementRetries(secretNamespace, secretName string) error {
 func resetRetries(secretNamespace, secretName string) error {
 	l := log.WithFields(log.Fields{
 		"action": "resetRetries",
+		"secret": fmt.Sprintf("%s/%s", secretNamespace, secretName),
 	})
 	l.Debugf("resetRetries %s/%s", secretNamespace, secretName)
 	// get the secret from k8s, since we don't know if data has been changed by a store
@@ -212,7 +214,7 @@ func resetRetries(secretNamespace, secretName string) error {
 	delete(secret.Annotations, state.OperatorName+"/next-retry")
 	_, err = state.KubeClient.CoreV1().Secrets(secretNamespace).Update(context.Background(), secret, metav1.UpdateOptions{})
 	if err != nil {
-		l.WithError(err).Errorf("Update error")
+		l.WithError(err).Errorf("Update secret error")
 		return err
 	}
 	return nil
@@ -279,16 +281,18 @@ func EnabledStores(s *corev1.Secret) []StoreType {
 func SyncSecretToStore(secret *corev1.Secret, store StoreType) error {
 	l := log.WithFields(log.Fields{
 		"action": "SyncSecretToStore",
+		"store":  store,
+		"secret": fmt.Sprintf("%s/%s", secret.Namespace, secret.Name),
 	})
 	l.Debugf("syncing store %s", store)
 	rs, err := NewStore(store)
 	if err != nil {
 		l.WithError(err).Errorf("NewStore error")
-		return err
+		return fmt.Errorf("error creating store %s: %v", store, err)
 	}
 	if err := rs.Update(secret); err != nil {
-		l.WithError(err).Errorf("Update error")
-		return err
+		l.WithError(err).Errorf("RemoteStore error")
+		return fmt.Errorf("error syncing secret %s/%s to store %s: %v", secret.Namespace, secret.Name, store, err)
 	}
 	return nil
 }
@@ -339,7 +343,7 @@ func HandleSecret(s *corev1.Secret) error {
 		if err := incrementRetries(s.Namespace, s.Name); err != nil {
 			l.WithError(err).Errorf("incrementRetries error")
 		}
-		return fmt.Errorf("errors syncing secret %s/%s to stores: %v", s.Namespace, s.Name, errs)
+		return fmt.Errorf("errors syncing secret %s/%s: %v", s.Namespace, s.Name, errs)
 	} else {
 		// reset the failed-sync-attempts annotation
 		if err := resetRetries(s.Namespace, s.Name); err != nil {
