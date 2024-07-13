@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"os"
 	"time"
 
@@ -14,7 +15,7 @@ import (
 )
 
 func init() {
-	ll, lerr := log.ParseLevel(os.Getenv("LOG_LEVEL"))
+	ll, lerr := log.ParseLevel(cmp.Or(os.Getenv("LOG_LEVEL"), "info"))
 	if lerr != nil {
 		ll = log.InfoLevel
 	}
@@ -24,9 +25,7 @@ func init() {
 			"action": "init",
 		},
 	)
-	if os.Getenv("OPERATOR_NAME") != "" {
-		state.OperatorName = os.Getenv("OPERATOR_NAME")
-	}
+	state.OperatorName = cmp.Or(os.Getenv("OPERATOR_NAME"), state.OperatorName)
 	cerr := state.CreateKubeClient()
 	if cerr != nil {
 		l.Fatal(cerr)

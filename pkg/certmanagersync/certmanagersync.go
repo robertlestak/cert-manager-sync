@@ -23,6 +23,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+var (
+	ErrInvalidStoreType = errors.New("invalid store type")
+)
+
 type StoreType string
 
 const (
@@ -67,7 +71,7 @@ func NewStore(storeType StoreType) (RemoteStore, error) {
 	case VaultStoreType:
 		store = &vault.VaultStore{}
 	default:
-		return nil, errors.New("invalid store type")
+		return nil, ErrInvalidStoreType
 	}
 	return store, nil
 }

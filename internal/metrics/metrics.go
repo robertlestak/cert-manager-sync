@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"cmp"
 	"net/http"
 	"os"
 
@@ -28,17 +29,17 @@ func SetFailure(namespace, secret, store string) {
 	SyncStatus.WithLabelValues(namespace, secret, store, "fail").Set(1)
 }
 
+func init() {
+	InitMetrics()
+}
+
 func Serve() {
 	l := log.WithFields(log.Fields{
 		"pkg": "metrics",
 		"fn":  "Serve",
 	})
 	l.Debug("starting metrics server")
-	InitMetrics()
-	port := os.Getenv("METRICS_PORT")
-	if port == "" {
-		port = "9090"
-	}
+	port := cmp.Or(os.Getenv("METRICS_PORT"), "9090")
 	http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})

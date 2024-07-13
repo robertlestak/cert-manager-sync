@@ -28,12 +28,9 @@ type IncapsulaStore struct {
 }
 
 func impervaApiBase() string {
-	fromEnv := os.Getenv("INCAPSULA_API")
-	if fromEnv == "" && os.Getenv("IMPERVA_API") != "" {
-		fromEnv = os.Getenv("IMPERVA_API")
-	}
-	defaultVal := "https://my.imperva.com/api/prov/v1"
-	return cmp.Or(fromEnv, defaultVal)
+	fromEnv := cmp.Or(os.Getenv("INCAPSULA_API"), os.Getenv("IMPERVA_API"))
+	fromEnv = cmp.Or(fromEnv, "https://my.imperva.com/api/prov/v1")
+	return fromEnv
 }
 
 func (s *IncapsulaStore) GetApiKey(ctx context.Context) error {

@@ -137,11 +137,12 @@ func (s *VaultStore) WriteSecret(sec map[string]interface{}) (map[string]interfa
 	if len(pp) == 0 {
 		return secrets, errors.New("secret path required")
 	}
-	s.Path = strings.Join(pp, "/")
-	l.Debugf("vault.WriteSecret writing to %s", s.Path)
-	if s == nil {
-		return secrets, errors.New("secret data required")
+	if pp == nil {
+		s.Path = "/"
+	} else {
+		s.Path = strings.Join(pp, "/")
 	}
+	l.Debugf("vault.WriteSecret writing to %s", s.Path)
 	if s.Path == "" {
 		return secrets, errors.New("secret path required")
 	}

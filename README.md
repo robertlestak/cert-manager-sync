@@ -355,7 +355,9 @@ The operator can be deployed as-is with no additional configuration. However, yo
 
 ```bash
 INCAPSULA_API=https://my.imperva.com/api/prov/v1 # Incapsula API URL
-SECRETS_NAMESPACE= # Namespace to look for secrets in. default to all namespaces
+DISABLED_NAMESPACES= # csv of namespaces to ignore. default is empty (all namespaces are watched)
+ENABLED_NAMESPACES= # csv of namespaces to watch. default is empty (all namespaces are watched)
+SECRETS_NAMESPACE= # DEPRECATED, replaced by ENABLED_NAMESPACES. Namespace to look for secrets in. overrides ENABLED_NAMESPACES if set
 OPERATOR_NAME=cert-manager-sync.lestak.sh # Operator name. use for white-labeling
 LOG_LEVEL=info # Log level. trace, debug, info, warn, error, fatal
 CACHE_DISABLE=false # Disable cache

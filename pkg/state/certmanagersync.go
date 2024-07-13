@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
@@ -138,6 +139,42 @@ func CreateKubeClient() error {
 	return nil
 }
 
+func namespaceDisabled(n string) bool {
+	// if DISABLED_NAMESPACES is set, don't watch those namespaces
+	disabledNs := strings.Split(os.Getenv("DISABLED_NAMESPACES"), ",")
+	for _, ns := range disabledNs {
+		if ns == n {
+			return true
+		}
+	}
+	// if DISABLED_NAMESPACES is not set, watch all namespaces
+	return false
+}
+
+func namespaceEnabled(n string) bool {
+	// SECRETS_NAMESPACE is deprecated and has been replaced by ENABLED_NAMESPACES.
+	// SECRETS_NAMESPACE will be removed in a future release
+	// if a single SECRETS_NAMESPACE is set, only watch that namespace
+	if os.Getenv("SECRETS_NAMESPACE") != "" && n != os.Getenv("SECRETS_NAMESPACE") {
+		return false
+	} else if os.Getenv("SECRETS_NAMESPACE") != "" && n == os.Getenv("SECRETS_NAMESPACE") {
+		return true
+	}
+	// if ENABLED_NAMESPACES is set, only watch those namespaces
+	if os.Getenv("ENABLED_NAMESPACES") != "" {
+		enabledNs := strings.Split(os.Getenv("ENABLED_NAMESPACES"), ",")
+		for _, ns := range enabledNs {
+			if ns == n {
+				return true
+			}
+		}
+		// if ENABLED_NAMESPACES is set, but the namespace is not in the list, don't watch
+		return false
+	}
+	// if ENABLED_NAMESPACES is not set, watch all namespaces
+	return true
+}
+
 func SecretWatched(s *corev1.Secret) bool {
 	l := log.WithFields(
 		log.Fields{
@@ -148,8 +185,12 @@ func SecretWatched(s *corev1.Secret) bool {
 	if s.Annotations[OperatorName+"/sync-enabled"] != "true" {
 		return false
 	}
-	if os.Getenv("SECRETS_NAMESPACE") != "" && s.Namespace != os.Getenv("SECRETS_NAMESPACE") {
-		l.Debugf("skipping secret in different namespace: %s", s.Namespace)
+	if namespaceDisabled(s.Namespace) {
+		l.Debug("namespace disabled")
+		return false
+	}
+	if !namespaceEnabled(s.Namespace) {
+		l.Debug("namespace not enabled")
 		return false
 	}
 	if len(s.Data["tls.crt"]) == 0 || len(s.Data["tls.key"]) == 0 {

@@ -12,7 +12,52 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+func TestParseSecret(t *testing.T) {
+	tests := []struct {
+		name   string
+		secret *corev1.Secret
+		want   *Certificate
+	}{
+		{
+			name: "Test with a valid secret",
+			secret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "test-secret",
+					Namespace:   "test-namespace",
+					Annotations: map[string]string{"annotation-key": "annotation-value"},
+					Labels:      map[string]string{"label-key": "label-value"},
+				},
+				Data: map[string][]byte{
+					"ca.crt":  []byte("test-ca"),
+					"tls.crt": []byte("test-crt"),
+					"tls.key": []byte("test-key"),
+				},
+			},
+			want: &Certificate{
+				SecretName:  "test-secret",
+				Namespace:   "test-namespace",
+				Annotations: map[string]string{"annotation-key": "annotation-value"},
+				Labels:      map[string]string{"label-key": "label-value"},
+				Ca:          []byte("test-ca"),
+				Certificate: []byte("test-crt"),
+				Key:         []byte("test-key"),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ParseSecret(tt.secret); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("ParseSecret() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
 
 // GenerateKey generates an ECDSA private key.
 func GenerateKey() ([]byte, error) {

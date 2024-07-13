@@ -2,6 +2,7 @@ package threatx
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -85,6 +86,10 @@ func (s *ThreatXStore) GetAPIKey(ctx context.Context) error {
 	return nil
 }
 
+func threatxApiBase() string {
+	return cmp.Or(os.Getenv("THREATX_API"), "https://provision.threatx.io/tx_api")
+}
+
 // ThreatxLogin retrieves the api token from k8s secret and then generates a short-term token against ThreatX API
 func (s *ThreatXStore) ThreatxLogin(ctx context.Context) error {
 	l := log.WithFields(log.Fields{
@@ -106,7 +111,7 @@ func (s *ThreatXStore) ThreatxLogin(ctx context.Context) error {
 	}
 	l.Debugf("request=%s", string(jd))
 	c := &http.Client{}
-	req, err := http.NewRequest("POST", os.Getenv("THREATX_API")+"/v1/login", bytes.NewBuffer(jd))
+	req, err := http.NewRequest("POST", threatxApiBase()+"/v1/login", bytes.NewBuffer(jd))
 	if err != nil {
 		l.Error(err)
 		return err
@@ -169,7 +174,7 @@ func (s *ThreatXStore) GetSite(ctx context.Context) (ThreatXSite, error) {
 	}
 	l.Debugf("request=%s", string(jd))
 	c := &http.Client{}
-	req, err := http.NewRequest("POST", os.Getenv("THREATX_API")+"/v2/sites", bytes.NewBuffer(jd))
+	req, err := http.NewRequest("POST", threatxApiBase()+"/v2/sites", bytes.NewBuffer(jd))
 	if err != nil {
 		l.Error(err)
 		return tx, err
@@ -236,7 +241,7 @@ func (s *ThreatXStore) UpdateSite(ctx context.Context, tx ThreatXSite) error {
 	}
 	l.Debugf("request=%s", string(jd))
 	c := &http.Client{}
-	req, err := http.NewRequest("POST", os.Getenv("THREATX_API")+"/v2/sites", bytes.NewBuffer(jd))
+	req, err := http.NewRequest("POST", threatxApiBase()+"/v2/sites", bytes.NewBuffer(jd))
 	if err != nil {
 		l.Error(err)
 		return err

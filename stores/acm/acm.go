@@ -47,6 +47,16 @@ func (s *ACMStore) GetApiKey(ctx context.Context) error {
 	return nil
 }
 
+func (s *ACMStore) awsRegion() string {
+	if s.Region == "" {
+		s.Region = os.Getenv("AWS_REGION")
+	}
+	if s.Region == "" {
+		s.Region = "us-east-1"
+	}
+	return s.Region
+}
+
 // createAWSSession will connect to AWS with the account's credentials from vault
 func (s *ACMStore) createAWSSession() (*session.Session, *aws.Config, error) {
 	l := log.WithFields(
@@ -55,14 +65,8 @@ func (s *ACMStore) createAWSSession() (*session.Session, *aws.Config, error) {
 		},
 	)
 	l.Debug("createAWSSession")
-	if s.Region == "" {
-		s.Region = os.Getenv("AWS_REGION")
-	}
-	if s.Region == "" {
-		s.Region = "us-east-1"
-	}
 	cfg := &aws.Config{
-		Region: aws.String(s.Region),
+		Region: aws.String(s.awsRegion()),
 	}
 	if s.SecretName != "" {
 		if err := s.GetApiKey(context.Background()); err != nil {
