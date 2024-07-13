@@ -1,6 +1,7 @@
 package vault
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"os"
@@ -24,6 +25,10 @@ type VaultStore struct {
 	Token      string      // auto-filled
 }
 
+func kubeToken() string {
+	return cmp.Or(os.Getenv("KUBE_TOKEN"), "/var/run/secrets/kubernetes.io/serviceaccount/token")
+}
+
 // NewClients creates and returns a new vault client with a valid token or error
 func (s *VaultStore) NewClient() (*api.Client, error) {
 	l := log.WithFields(log.Fields{
@@ -44,9 +49,9 @@ func (s *VaultStore) NewClient() (*api.Client, error) {
 		l.Debugf("vault.NewClient using namespace %s", s.Namespace)
 		s.Client.SetNamespace(s.Namespace)
 	}
-	if os.Getenv("KUBE_TOKEN") != "" {
+	if kubeToken() != "" {
 		l.Debugf("vault.NewClient using KUBE_TOKEN")
-		fd, err := os.ReadFile(os.Getenv("KUBE_TOKEN"))
+		fd, err := os.ReadFile(kubeToken())
 		if err != nil {
 			l.WithError(err).Errorf("vault.NewClient error")
 			return s.Client, err
