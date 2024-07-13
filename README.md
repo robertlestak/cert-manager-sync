@@ -20,6 +20,7 @@ Enable Kubernetes `cert-manager` to sync TLS certificates to AWS ACM, GCP, Hashi
   - [Exponential backoff after a failed sync](#exponential-backoff-after-a-failed-sync)
   - [Configuration](#configuration)
   - [Deployment](#deployment)
+    - [Optional Operator Configuration](#optional-operator-configuration)
   - [Monitoring](#monitoring)
     - [Prometheus Metrics](#prometheus-metrics)
     - [Error Logging](#error-logging)
@@ -340,12 +341,34 @@ spec:
 
 ## Deployment
 
-Create `regcred` registry credential secret in `cert-manager` namespace.
+If you are using EKS IRSA or GKE Workload Identity, update `devops/k8s/sa.yaml` with the appropriate role or service account details.
 
-If you want to store the certs in different namespaces, modify `SECRETS_NAMESPACE` var in the [deployment file](devops/k8s/deploy.yaml). If this value is not set (or set to an empty value `""`), all namespaces will be watched.
+Deploy the operator:
 
 ```bash
 kubectl apply -f devops/k8s
+```
+
+### Optional Operator Configuration
+
+The operator can be deployed as-is with no additional configuration. However, you can configure the following environment variables to customize the operator:
+
+```bash
+INCAPSULA_API=https://my.imperva.com/api/prov/v1 # Incapsula API URL
+SECRETS_NAMESPACE= # Namespace to look for secrets in. default to all namespaces
+OPERATOR_NAME=cert-manager-sync.lestak.sh # Operator name. use for white-labeling
+LOG_LEVEL=info # Log level. trace, debug, info, warn, error, fatal
+CACHE_DISABLE=false # Disable cache
+METRICS_PORT=9090 # Metrics port
+ENABLE_METRICS=true # Enable metrics server
+```
+
+You can store these in a `cert-manager-sync` secret in the same namespace `cert-manager-sync` is deployed in (default is `cert-manager`) and it will be picked up by the operator.
+
+```bash
+kubectl -n cert-manager \
+  create secret generic cert-manager-sync \
+  --from-literal=LOG_LEVEL=debug
 ```
 
 ## Monitoring
