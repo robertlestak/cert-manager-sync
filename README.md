@@ -355,8 +355,7 @@ kubectl apply -f devops/k8s
 The operator exposes Prometheus metrics on `/metrics` endpoint. You can use the following query to monitor the sync status:
 
 ```promql
-cert_manager_sync_success{namespace="cert-manager",secret="example",store="acm"}
-cert_manager_sync_failure{namespace="cert-manager",secret="example",store="acm"}
+cert_manager_sync_status{namespace="cert-manager",secret="example",store="acm",status="success"}
 ```
 
 Setting `ENABLE_METRICS=false` will disable the metrics server.

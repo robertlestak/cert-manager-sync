@@ -10,27 +10,22 @@ import (
 )
 
 var (
-	SyncSuccess = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "cert_manager_sync_success",
-		Help: "cert-manager-sync successes by namespace, secret, and store",
-	}, []string{"namespace", "secret", "store"})
-	SyncFailure = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "cert_manager_sync_failure",
-		Help: "cert-manager-sync failures by namespace, secret, and store",
-	}, []string{"namespace", "secret", "store"})
+	SyncStatus = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "cert_manager_sync_status",
+		Help: "cert-manager-sync status by namespace, secret, and store",
+	}, []string{"namespace", "secret", "store", "status"})
 )
 
 func InitMetrics() {
-	prometheus.MustRegister(SyncSuccess)
-	prometheus.MustRegister(SyncFailure)
+	prometheus.MustRegister(SyncStatus)
 }
 
 func SetSuccess(namespace, secret, store string) {
-	SyncSuccess.WithLabelValues(namespace, secret, store).Inc()
+	SyncStatus.WithLabelValues(namespace, secret, store, "success").Set(1)
 }
 
 func SetFailure(namespace, secret, store string) {
-	SyncFailure.WithLabelValues(namespace, secret, store).Inc()
+	SyncStatus.WithLabelValues(namespace, secret, store, "fail").Set(1)
 }
 
 func Serve() {
