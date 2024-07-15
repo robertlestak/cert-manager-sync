@@ -6,195 +6,88 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/stretchr/testify/assert"
 )
 
-func TestCacheChangedAndAddToCache(t *testing.T) {
-	tests := []struct {
-		name           string
-		secret         *corev1.Secret
-		modifiedSecret *corev1.Secret
-		expected       bool
-	}{
-		{
-			name: "Test with new secret",
-			secret: &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-secret",
-					Namespace: "test-namespace",
-				},
-				Data: map[string][]byte{
-					"tls.crt": []byte("test-crt"),
-					"tls.key": []byte("test-key"),
-				},
-			},
-			modifiedSecret: nil,
-			expected:       false,
+var mockSecret = &corev1.Secret{
+	ObjectMeta: metav1.ObjectMeta{
+		Name:      "test-secret",
+		Namespace: "default",
+		Annotations: map[string]string{
+			OperatorName + "/hash": "existingHashValue",
 		},
-		{
-			name: "Test with existing secret with no changes",
-			secret: &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-secret",
-					Namespace: "test-namespace",
-				},
-				Data: map[string][]byte{
-					"tls.crt": []byte("test-crt"),
-					"tls.key": []byte("test-key"),
-				},
-			},
-			modifiedSecret: nil,
-			expected:       false,
-		},
-		{
-			name: "Test with existing secret with data changes",
-			secret: &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-secret",
-					Namespace: "test-namespace",
-				},
-				Data: map[string][]byte{
-					"tls.crt": []byte("test-crt"),
-					"tls.key": []byte("test-key"),
-				},
-			},
-			modifiedSecret: &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-secret",
-					Namespace: "test-namespace",
-				},
-				Data: map[string][]byte{
-					"tls.crt": []byte("test-crt-changed"),
-					"tls.key": []byte("test-key"),
-				},
-			},
-			expected: true,
-		},
-		{
-			name: "Test with existing secret without metadata changes",
-			secret: &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-secret",
-					Namespace: "test-namespace",
-					Annotations: map[string]string{
-						"test-annotation": "test-annotation-value",
-					},
-				},
-				Data: map[string][]byte{
-					"tls.crt": []byte("test-crt"),
-					"tls.key": []byte("test-key"),
-				},
-			},
-			modifiedSecret: &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-secret",
-					Namespace: "test-namespace",
-					Annotations: map[string]string{
-						"test-annotation": "test-annotation-value",
-					},
-				},
-				Data: map[string][]byte{
-					"tls.crt": []byte("test-crt"),
-					"tls.key": []byte("test-key"),
-				},
-			},
-			expected: false,
-		},
-		{
-			name: "Test with existing secret wit metadata changes",
-			secret: &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-secret",
-					Namespace: "test-namespace",
-					Annotations: map[string]string{
-						"test-annotation": "test-annotation-value",
-					},
-				},
-				Data: map[string][]byte{
-					"tls.crt": []byte("test-crt"),
-					"tls.key": []byte("test-key"),
-				},
-			},
-			modifiedSecret: &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-secret",
-					Namespace: "test-namespace",
-					Annotations: map[string]string{
-						"test-annotation": "test-annotation-value-changed",
-					},
-				},
-				Data: map[string][]byte{
-					"tls.crt": []byte("test-crt"),
-					"tls.key": []byte("test-key"),
-				},
-			},
-			expected: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			AddToCache(tt.secret)
-			if tt.modifiedSecret == nil {
-				tt.modifiedSecret = tt.secret
-			}
-			if got := CacheChanged(tt.modifiedSecret); got != tt.expected {
-				t.Errorf("CacheChanged() = %v, want %v", got, tt.expected)
-			}
-		})
-	}
+	},
+	Data: map[string][]byte{
+		"key": []byte("value"),
+	},
 }
 
-func TestStringMapChanged(t *testing.T) {
-	tests := []struct {
-		name     string
-		a        map[string]string
-		b        map[string]string
-		expected bool
-	}{
-		{
-			name: "Test with two identical maps",
-			a: map[string]string{
-				"key1": "value1",
-				"key2": "value2",
+// TestHashSecret checks if hashSecret function returns a consistent hash value
+func TestHashSecret(t *testing.T) {
+	hash := hashSecret(mockSecret)
+	assert.NotEmpty(t, hash, "The hash should not be empty")
+}
+
+func TestHashSecretDataAndAnnotationsChange(t *testing.T) {
+	// Step 1: Create a base mock secret
+	baseMockSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-secret",
+			Namespace: "default",
+			Annotations: map[string]string{
+				"annotation-key":          "annotation-value",
+				OperatorName + "/testing": "annotation-value",
 			},
-			b: map[string]string{
-				"key1": "value1",
-				"key2": "value2",
-			},
-			expected: false,
 		},
-		{
-			name: "Test with two maps of different lengths",
-			a: map[string]string{
-				"key1": "value1",
-				"key2": "value2",
-			},
-			b: map[string]string{
-				"key1": "value1",
-			},
-			expected: true,
-		},
-		{
-			name: "Test with two maps with different values for the same key",
-			a: map[string]string{
-				"key1": "value1",
-				"key2": "value2",
-			},
-			b: map[string]string{
-				"key1": "value1",
-				"key2": "value3",
-			},
-			expected: true,
+		Data: map[string][]byte{
+			"data-key": []byte("data-value"),
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := stringMapChanged(tt.a, tt.b); got != tt.expected {
-				t.Errorf("stringMapChanged() = %v, want %v", got, tt.expected)
-			}
-		})
-	}
+	// Generate a hash for the base mock secret
+	baseHash := hashSecret(baseMockSecret)
+	assert.NotEmpty(t, baseHash, "The base hash should not be empty")
+
+	// Step 2: Modify the secret's data
+	modifiedDataSecret := baseMockSecret.DeepCopy()
+	modifiedDataSecret.Data["data-key"] = []byte("new-data-value")
+	modifiedDataHash := hashSecret(modifiedDataSecret)
+	assert.NotEqual(t, baseHash, modifiedDataHash, "Hash should change with data modification")
+
+	// Step 3: Reset the secret to its base state and modify the secret's annotations
+	modifiedAnnotationsSecret := baseMockSecret.DeepCopy()
+	modifiedAnnotationsSecret.Annotations["annotation-key"] = "new-annotation-value"
+	modifiedAnnotationsHash := hashSecret(modifiedAnnotationsSecret)
+	assert.Equal(t, baseHash, modifiedAnnotationsHash, "Hash should not change with non-tracked annotation modification")
+
+	// Step 4: Reset the secret to its base state and modify the secret's annotations
+	modifiedAnnotationsSecret = baseMockSecret.DeepCopy()
+	modifiedAnnotationsSecret.Annotations[OperatorName+"/testing"] = "new-annotation-value"
+	modifiedAnnotationsHash = hashSecret(modifiedAnnotationsSecret)
+	assert.NotEqual(t, baseHash, modifiedAnnotationsHash, "Hash should change with tracked annotation modification")
+}
+
+// TestCmsHash checks if cmsHash correctly extracts the hash from the secret's annotations
+func TestCmsHash(t *testing.T) {
+	hash := cmsHash(mockSecret)
+	assert.Equal(t, "existingHashValue", hash, "The hashes should match")
+}
+
+// TestCacheDisable checks different scenarios for cache changes
+func TestCacheDisable(t *testing.T) {
+	// Scenario 1: Cache is not disabled and hash values are different
+	os.Setenv("CACHE_DISABLE", "false")
+	changed := CacheChanged(mockSecret)
+	assert.True(t, changed, "Cache should be considered changed")
+
+	// Scenario 2: Cache is disabled
+	os.Setenv("CACHE_DISABLE", "true")
+	changed = CacheChanged(mockSecret)
+	assert.True(t, changed, "Cache should always be considered changed when disabled")
+
+	// Cleanup
+	os.Unsetenv("CACHE_DISABLE")
 }
 
 func TestSecretWatched(t *testing.T) {

@@ -18,6 +18,7 @@ Enable Kubernetes `cert-manager` to sync TLS certificates to AWS ACM, GCP, Hashi
     - [Incapsula](#incapsula)
     - [ThreatX](#threatx)
   - [Exponential backoff after a failed sync](#exponential-backoff-after-a-failed-sync)
+  - [Forcing an immediate sync](#forcing-an-immediate-sync)
   - [Configuration](#configuration)
   - [Deployment](#deployment)
     - [Optional Operator Configuration](#optional-operator-configuration)
@@ -256,6 +257,17 @@ kubectl -n cert-manager \
 	--overwrite
 ```
 
+## Forcing an immediate sync
+
+By default, the operator will only sync certs to the remote store(s) if the certificate or `cert-manager-sync` annotations have changed. This is to prevent unnecessary syncs and rate limiting on the remote stores. If however, you've deleted the remote certificate or otherwise need to force an immediate sync, you can update the `cert-manager-sync.lestak.sh/hash` annotation on the secret to a new value. This will cause the operator to immediately sync the certificate to the remote store(s).
+
+```bash
+kubectl -n cert-manager \
+  annotate secret secret-name \
+  cert-manager-sync.lestak.sh/hash- \
+  --overwrite
+```
+
 ## Configuration
 
 The operator uses Kubernetes annotations to define the sync locations and configurations.
@@ -311,6 +323,7 @@ metadata:
     cert-manager-sync.lestak.sh/max-sync-attempts: "5" # limit the number of retries to 5, after which you will need to manually resolve the underlying issue and reset/remove the failed-sync-attempts annotation
     cert-manager-sync.lestak.sh/failed-sync-attempts: "0" # number of failed sync attempts, will be auto-filled by operator
     cert-manager-sync.lestak.sh/next-retry: "2022-01-01T00:00:00Z" # next retry time (RFC3339), will be auto-filled by operator. Remove this if you want to retry immediately.
+    cert-manager-sync.lestak.sh/hash: "abc123" # hash of the secret for tracking changes, will be auto-filled by operator
 data:
   tls.crt: ""
   tls.key: ""

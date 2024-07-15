@@ -1,15 +1,19 @@
 package state
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
-	"sync"
 
-	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
 	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -19,46 +23,162 @@ import (
 var (
 	OperatorName = "cert-manager-sync.lestak.sh"
 	KubeClient   *kubernetes.Clientset
-	Cache        map[string]*corev1.Secret
-	cacheLock    sync.Mutex
 )
 
-func AddToCache(secret *corev1.Secret) {
-	l := log.WithFields(
-		log.Fields{
-			"action":     "addToCache",
-			"secretName": secret.ObjectMeta.Name,
-			"namespace":  secret.ObjectMeta.Namespace,
-		},
-	)
-	l.Debug("adding secret to cache")
-	cacheLock.Lock()
-	defer cacheLock.Unlock()
-	key := fmt.Sprintf("%s/%s", secret.Namespace, secret.Name)
-	if Cache == nil {
-		Cache = make(map[string]*corev1.Secret)
+func addHashAnnotation(secretNamespace, secretName, hash string) error {
+	l := log.WithFields(log.Fields{
+		"action": "incrementRetries",
+		"secret": fmt.Sprintf("%s/%s", secretNamespace, secretName),
+		"hash":   hash,
+	})
+	l.Debugf("incrementRetries %s/%s", secretNamespace, secretName)
+	// get the secret from k8s, since we don't know if data has been changed by a store
+	if KubeClient == nil {
+		l.Debugf("KubeClient is nil")
+		return fmt.Errorf("KubeClient is nil")
 	}
-	Cache[key] = secret
-	l.Debugf("cache length: %d", len(Cache))
+	gopt := metav1.GetOptions{}
+	secret, err := KubeClient.CoreV1().Secrets(secretNamespace).Get(context.Background(), secretName, gopt)
+	if err != nil {
+		l.WithError(err).Errorf("Get error")
+		return err
+	}
+	if secret.Annotations == nil {
+		secret.Annotations = make(map[string]string)
+	}
+	secret.Annotations[OperatorName+"/hash"] = hash
+	_, err = KubeClient.CoreV1().Secrets(secretNamespace).Update(context.Background(), secret, metav1.UpdateOptions{})
+	if err != nil {
+		l.WithError(err).Errorf("Update secret error")
+		return err
+	}
+	l.Debugf("incremented retries")
+	return nil
 }
 
-func stringMapChanged(a, b map[string]string) bool {
-	l := log.WithFields(log.Fields{
-		"action": "stringMapChanged",
-	})
-	l.Debug("Checking stringMapChanged")
-	if len(a) != len(b) {
-		l.Debugf("stringMapChanged: len(a)=%d len(b)=%d", len(a), len(b))
-		return true
+// kvPair represents a key-value pair.
+type kvPair struct {
+	Key   string
+	Value any
+}
+
+// hashMapValues takes a map[string]any and returns a deterministic hash of its values.
+func hashMapValues(m map[string]any) (string, error) {
+	// Convert map to a slice of key-value pairs.
+	var pairs []kvPair
+	for k, v := range m {
+		pairs = append(pairs, kvPair{Key: k, Value: v})
 	}
-	for k, v := range a {
-		if b[k] != v {
-			l.Debugf("stringMapChanged: a[%s]=%s b[%s]=%s", k, v, k, b[k])
-			return true
+
+	// Sort the slice by key.
+	sort.Slice(pairs, func(i, j int) bool {
+		return pairs[i].Key < pairs[j].Key
+	})
+
+	// Serialize the sorted key-value pairs.
+	serialized, err := json.Marshal(pairs)
+	if err != nil {
+		return "", err // Handle serialization error.
+	}
+
+	// Hash the serialized string.
+	hash := sha256.Sum256(serialized)
+
+	// Return the hash as a hexadecimal string.
+	return hex.EncodeToString(hash[:]), nil
+}
+
+func hashSecret(s *corev1.Secret) string {
+	l := log.WithFields(log.Fields{
+		"action": "hashSecret",
+	})
+	l.Debug("hashing secret")
+	var secretHash string
+	dataMap := make(map[string]any)
+	jd, err := json.Marshal(s.Data)
+	if err != nil {
+		l.WithError(err).Errorf("json.Marshal error")
+		return ""
+	}
+	if err := json.Unmarshal(jd, &dataMap); err != nil {
+		l.WithError(err).Errorf("json.Unmarshal error")
+		return ""
+	}
+	hashedData, err := hashMapValues(dataMap)
+	if err != nil {
+		l.WithError(err).Errorf("hashMapValues error")
+		return ""
+	}
+	// do the same for operator annotations
+	annotationsMap := make(map[string]any)
+	for k, v := range s.Annotations {
+		// we only care about annotations that start with the operator name
+		// and we do not want to hash the hash annotation itself
+		if strings.HasPrefix(k, OperatorName) && k != OperatorName+"/hash" {
+			annotationsMap[k] = v
 		}
 	}
-	l.Debug("stringMapChanged: false")
-	return false
+	jd, err = json.Marshal(annotationsMap)
+	if err != nil {
+		l.WithError(err).Errorf("json.Marshal error")
+		return ""
+	}
+	if err := json.Unmarshal(jd, &annotationsMap); err != nil {
+		l.WithError(err).Errorf("json.Unmarshal error")
+		return ""
+	}
+	hashedAnnotations, err := hashMapValues(annotationsMap)
+	if err != nil {
+		l.WithError(err).Errorf("hashMapValues error")
+		return ""
+	}
+	// combine the two hashes
+	secretHash = hashedData + hashedAnnotations
+	// hash the combined hash
+	hash := sha256.Sum256([]byte(secretHash))
+	secretHash = hex.EncodeToString(hash[:])
+	return secretHash
+}
+
+func cmsHash(s *corev1.Secret) string {
+	l := log.WithFields(log.Fields{
+		"action":    "cmsHash",
+		"namespace": s.Namespace,
+		"name":      s.Name,
+	})
+	l.Debug("cmsHash")
+	var cmsHash string
+	if s.Annotations[OperatorName+"/hash"] != "" {
+		cmsHash = s.Annotations[OperatorName+"/hash"]
+	}
+	return cmsHash
+}
+
+func cacheSecret(s *corev1.Secret) error {
+	l := log.WithFields(
+		log.Fields{
+			"action": "cacheSecret",
+		},
+	)
+	l.Debug("caching secret")
+	sHash := hashSecret(s)
+	if err := addHashAnnotation(s.Namespace, s.Name, sHash); err != nil {
+		l.WithError(err).Errorf("addHashAnnotation error")
+		return err
+	}
+	return nil
+}
+
+func Cache(s *corev1.Secret) error {
+	l := log.WithFields(
+		log.Fields{
+			"action":     "Cache",
+			"secretName": s.ObjectMeta.Name,
+			"namespace":  s.ObjectMeta.Namespace,
+		},
+	)
+	l.Debug("caching secret")
+	return cacheSecret(s)
 }
 
 func CacheChanged(s *corev1.Secret) bool {
@@ -73,29 +193,15 @@ func CacheChanged(s *corev1.Secret) bool {
 		l.Debug("cache disabled")
 		return true
 	}
-	key := fmt.Sprintf("%s/%s", s.Namespace, s.Name)
-	if Cache == nil {
-		l.Debug("cache not initialized")
-		return true
-	}
-	if _, exists := Cache[key]; !exists {
-		// Secret not found in the cache, consider it as changed
-		l.Debug("secret not found in cache")
-		return true
-	}
-	oldSecret := Cache[key]
-	oldCert := tlssecret.ParseSecret(oldSecret)
-	newCert := tlssecret.ParseSecret(s)
-
-	certChanged := string(oldCert.Certificate) != string(newCert.Certificate)
-	labelsChanged := stringMapChanged(oldSecret.Labels, s.Labels)
-	annotationsChanged := stringMapChanged(oldSecret.Annotations, s.Annotations)
-
-	l.Debugf("cache status %s: certChanged=%t labelsChanged=%t annotationsChanged=%t",
-		oldSecret.Name, certChanged, labelsChanged, annotationsChanged)
-
-	if certChanged || labelsChanged || annotationsChanged {
-		l.Debugf("cache changed: %s", s.ObjectMeta.Name)
+	secretHash := hashSecret(s)
+	existingHash := cmsHash(s)
+	l = l.WithFields(log.Fields{
+		"secretHash":   secretHash,
+		"existingHash": existingHash,
+	})
+	l.Debugf("secretHash=%s existingHash=%s", secretHash, existingHash)
+	if secretHash != existingHash {
+		l.Debugf("cache changed")
 		return true
 	}
 	l.Debugf("cache not changed")
@@ -182,7 +288,9 @@ func SecretWatched(s *corev1.Secret) bool {
 			"secret":    s.ObjectMeta.Name,
 			"namespace": s.ObjectMeta.Namespace,
 		})
+	l.Trace("checking if secret is watched")
 	if s.Annotations[OperatorName+"/sync-enabled"] != "true" {
+		l.Trace("sync-enabled not true")
 		return false
 	}
 	if namespaceDisabled(s.Namespace) {

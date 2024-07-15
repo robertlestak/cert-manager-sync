@@ -232,7 +232,7 @@ func EnabledStores(s *corev1.Secret) []StoreType {
 	l.Debugf("checking EnabledStores %s", s.Name)
 	var stores []StoreType
 	if s.Annotations[state.OperatorName+"/sync-enabled"] != "true" {
-		l.Debug("sync not sync-enabled")
+		l.Trace("sync not sync-enabled")
 		return nil
 	}
 	// if there is a acm-enabled = true annotation, add acm to the list of stores
@@ -360,6 +360,6 @@ func HandleSecret(s *corev1.Secret) error {
 		}
 	}
 	// if the sync was a success, add the secret to the cache
-	state.AddToCache(s)
+	state.Cache(s)
 	return nil
 }
