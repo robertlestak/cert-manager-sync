@@ -173,6 +173,9 @@ func incrementRetries(secretNamespace, secretName string) error {
 		l.WithError(err).Errorf("Get error")
 		return err
 	}
+	if secret.Annotations == nil {
+		secret.Annotations = make(map[string]string)
+	}
 	// increment the failed-sync-attempts annotation
 	iv := consumedRetries(secret) + 1
 	secret.Annotations[state.OperatorName+"/failed-sync-attempts"] = strconv.Itoa(iv)
@@ -190,8 +193,11 @@ func incrementRetries(secretNamespace, secretName string) error {
 	// add the next-retry annotation to the secret
 	// this will be evaluated by the readyToRetry function
 	// when the next sync attempt is made
+	uo := metav1.UpdateOptions{
+		FieldManager: state.OperatorName,
+	}
 	secret.Annotations[state.OperatorName+"/next-retry"] = nextRetry
-	_, err = state.KubeClient.CoreV1().Secrets(secretNamespace).Update(context.Background(), secret, metav1.UpdateOptions{})
+	_, err = state.KubeClient.CoreV1().Secrets(secretNamespace).Update(context.Background(), secret, uo)
 	if err != nil {
 		l.WithError(err).Errorf("Update secret error")
 		return err
@@ -217,7 +223,10 @@ func resetRetries(secretNamespace, secretName string) error {
 	delete(secret.Annotations, state.OperatorName+"/failed-sync-attempts")
 	// remove the next-retry annotation
 	delete(secret.Annotations, state.OperatorName+"/next-retry")
-	_, err = state.KubeClient.CoreV1().Secrets(secretNamespace).Update(context.Background(), secret, metav1.UpdateOptions{})
+	uo := metav1.UpdateOptions{
+		FieldManager: state.OperatorName,
+	}
+	_, err = state.KubeClient.CoreV1().Secrets(secretNamespace).Update(context.Background(), secret, uo)
 	if err != nil {
 		l.WithError(err).Errorf("Update secret error")
 		return err

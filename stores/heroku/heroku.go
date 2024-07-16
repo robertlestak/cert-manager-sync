@@ -116,7 +116,9 @@ func (s *HerokuStore) Update(secret *corev1.Secret) error {
 	if origCertName != s.CertName {
 		secret.ObjectMeta.Annotations[state.OperatorName+"/heroku-cert-name"] = s.CertName
 		sc := state.KubeClient.CoreV1().Secrets(secret.ObjectMeta.Namespace)
-		uo := metav1.UpdateOptions{}
+		uo := metav1.UpdateOptions{
+			FieldManager: state.OperatorName,
+		}
 		_, uerr := sc.Update(
 			context.Background(),
 			secret,

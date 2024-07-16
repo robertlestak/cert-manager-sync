@@ -35,6 +35,9 @@ func impervaApiBase() string {
 
 func (s *IncapsulaStore) GetApiKey(ctx context.Context) error {
 	gopt := metav1.GetOptions{}
+	if s.SecretName == "" {
+		return fmt.Errorf("secret name not set")
+	}
 	sc, err := state.KubeClient.CoreV1().Secrets(s.SecretNamespace).Get(ctx, s.SecretName, gopt)
 	if err != nil {
 		return err

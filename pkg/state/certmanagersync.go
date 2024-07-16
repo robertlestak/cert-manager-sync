@@ -47,7 +47,10 @@ func addHashAnnotation(secretNamespace, secretName, hash string) error {
 		secret.Annotations = make(map[string]string)
 	}
 	secret.Annotations[OperatorName+"/hash"] = hash
-	_, err = KubeClient.CoreV1().Secrets(secretNamespace).Update(context.Background(), secret, metav1.UpdateOptions{})
+	uo := metav1.UpdateOptions{
+		FieldManager: OperatorName,
+	}
+	_, err = KubeClient.CoreV1().Secrets(secretNamespace).Update(context.Background(), secret, uo)
 	if err != nil {
 		l.WithError(err).Errorf("Update secret error")
 		return err

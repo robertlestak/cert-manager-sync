@@ -114,7 +114,9 @@ func (s *CloudflareStore) Update(secret *corev1.Secret) error {
 	if origCertId != s.CertId {
 		secret.ObjectMeta.Annotations[state.OperatorName+"/cloudflare-cert-id"] = s.CertId
 		sc := state.KubeClient.CoreV1().Secrets(secret.ObjectMeta.Namespace)
-		uo := metav1.UpdateOptions{}
+		uo := metav1.UpdateOptions{
+			FieldManager: state.OperatorName,
+		}
 		_, uerr := sc.Update(
 			context.Background(),
 			secret,
