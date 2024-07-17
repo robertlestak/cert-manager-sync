@@ -15,14 +15,15 @@ import (
 )
 
 type VaultStore struct {
-	Addr       string
-	Namespace  string
-	Role       string
-	AuthMethod string
-	Path       string
-	KubeToken  string      // auto-filled
-	Client     *api.Client // auto-filled
-	Token      string      // auto-filled
+	Addr         string
+	Namespace    string
+	Role         string
+	AuthMethod   string
+	Path         string
+	Base64Decode bool
+	KubeToken    string      // auto-filled
+	Client       *api.Client // auto-filled
+	Token        string      // auto-filled
 }
 
 func kubeToken() string {
@@ -177,6 +178,9 @@ func (s *VaultStore) ParseCertificate(c *tlssecret.Certificate) error {
 	if c.Annotations[state.OperatorName+"/vault-auth-method"] != "" {
 		s.AuthMethod = c.Annotations[state.OperatorName+"/vault-auth-method"]
 	}
+	if c.Annotations[state.OperatorName+"/vault-base64-decode"] == "true" || c.Annotations[state.OperatorName+"/vault-b64dec"] == "true" {
+		s.Base64Decode = true
+	}
 	return nil
 }
 
@@ -209,6 +213,12 @@ func (s *VaultStore) Update(secret *corev1.Secret) error {
 	if err != nil {
 		l.WithError(err).Errorf("vault.NewToken error")
 		return err
+	}
+	if s.Base64Decode {
+		if err := c.Base64Decode(); err != nil {
+			l.WithError(err).Errorf("Base64Decode error")
+			return err
+		}
 	}
 	cd := map[string]interface{}{
 		"tls.crt": c.Certificate,

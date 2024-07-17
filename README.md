@@ -172,7 +172,7 @@ Annotations:
     cert-manager-sync.lestak.sh/vault-role: "role-name" # HashiCorp Vault role name
     cert-manager-sync.lestak.sh/vault-auth-method: "auth-method" # HashiCorp Vault auth method name
     cert-manager-sync.lestak.sh/vault-path: "kv-name/path/to/secret" # HashiCorp Vault path to store cert
-
+    cert-manager-sync.lestak.sh/vault-base64-decode: "true" # base64 decode the cert before storing in Vault. Default is "false"
 ```
 
 ### Heroku
@@ -320,6 +320,7 @@ metadata:
     cert-manager-sync.lestak.sh/vault-role: "role-name" # HashiCorp Vault role name
     cert-manager-sync.lestak.sh/vault-auth-method: "auth-method" # HashiCorp Vault auth method name
     cert-manager-sync.lestak.sh/vault-path: "kv-name/path/to/secret" # HashiCorp Vault path to store cert
+    cert-manager-sync.lestak.sh/vault-base64-decode: "true" # base64 decode the cert before storing in Vault. Default is "false"
     cert-manager-sync.lestak.sh/max-sync-attempts: "5" # limit the number of retries to 5, after which you will need to manually resolve the underlying issue and reset/remove the failed-sync-attempts annotation
     cert-manager-sync.lestak.sh/failed-sync-attempts: "0" # number of failed sync attempts, will be auto-filled by operator
     cert-manager-sync.lestak.sh/next-retry: "2022-01-01T00:00:00Z" # next retry time (RFC3339), will be auto-filled by operator. Remove this if you want to retry immediately.
