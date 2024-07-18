@@ -304,14 +304,17 @@ func SyncSecretToStore(secret *corev1.Secret, store StoreType) error {
 	if err != nil {
 		l.WithError(err).Error("NewStore error")
 		metrics.SetFailure(secret.Namespace, secret.Name, string(store))
+		state.EventRecorder.Event(secret, corev1.EventTypeWarning, "SyncFailed", fmt.Sprintf("Secret sync failed to store %s", store))
 		return fmt.Errorf("error creating store %s: %v", store, err)
 	}
 	if err := rs.Update(secret); err != nil {
 		l.WithError(err).Error("sync error")
 		metrics.SetFailure(secret.Namespace, secret.Name, string(store))
+		state.EventRecorder.Event(secret, corev1.EventTypeWarning, "SyncFailed", fmt.Sprintf("Secret sync failed to store %s", store))
 		return fmt.Errorf("error syncing secret %s/%s to store %s: %v", secret.Namespace, secret.Name, store, err)
 	}
 	metrics.SetSuccess(secret.Namespace, secret.Name, string(store))
+	state.EventRecorder.Event(secret, corev1.EventTypeNormal, "Synced", fmt.Sprintf("Secret synced to %s", store))
 	return nil
 }
 
@@ -361,6 +364,7 @@ func HandleSecret(s *corev1.Secret) error {
 		if err := incrementRetries(s.Namespace, s.Name); err != nil {
 			l.WithError(err).Errorf("incrementRetries error")
 		}
+		state.EventRecorder.Event(s, corev1.EventTypeWarning, "SyncFailed", "Secret sync failed")
 		return fmt.Errorf("errors syncing secret %s/%s: %v", s.Namespace, s.Name, errs)
 	} else {
 		// reset the failed-sync-attempts annotation
@@ -370,5 +374,12 @@ func HandleSecret(s *corev1.Secret) error {
 	}
 	// if the sync was a success, add the secret to the cache
 	state.Cache(s)
+	eventMsg := fmt.Sprintf("Secret synced to %d store%s", len(stores), func() string {
+		if len(stores) == 1 {
+			return ""
+		}
+		return "s"
+	}())
+	state.EventRecorder.Event(s, corev1.EventTypeNormal, "Synced", eventMsg)
 	return nil
 }

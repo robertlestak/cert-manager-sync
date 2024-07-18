@@ -15,14 +15,18 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
+	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/homedir"
 )
 
 var (
-	OperatorName = "cert-manager-sync.lestak.sh"
-	KubeClient   *kubernetes.Clientset
+	OperatorName  = "cert-manager-sync.lestak.sh"
+	KubeClient    *kubernetes.Clientset
+	EventRecorder record.EventRecorder
 )
 
 func addHashAnnotation(secretNamespace, secretName, hash string) error {
@@ -41,6 +45,7 @@ func addHashAnnotation(secretNamespace, secretName, hash string) error {
 	secret, err := KubeClient.CoreV1().Secrets(secretNamespace).Get(context.Background(), secretName, gopt)
 	if err != nil {
 		l.WithError(err).Errorf("Get error")
+		EventRecorder.Eventf(secret, corev1.EventTypeWarning, "GetError", "Error getting secret: %v", err)
 		return err
 	}
 	if secret.Annotations == nil {
@@ -53,6 +58,7 @@ func addHashAnnotation(secretNamespace, secretName, hash string) error {
 	_, err = KubeClient.CoreV1().Secrets(secretNamespace).Update(context.Background(), secret, uo)
 	if err != nil {
 		l.WithError(err).Errorf("Update secret error")
+		EventRecorder.Eventf(secret, corev1.EventTypeWarning, "UpdateError", "Error updating secret: %v", err)
 		return err
 	}
 	l.Debugf("incremented retries")
@@ -245,6 +251,12 @@ func CreateKubeClient() error {
 		l.Debugf("kubernetes.NewForConfig error=%v", err)
 		return err
 	}
+	// Create broadcaster
+	broadcaster := record.NewBroadcaster()
+	broadcaster.StartRecordingToSink(&typedcorev1.EventSinkImpl{Interface: KubeClient.CoreV1().Events("")})
+
+	// Create event recorder
+	EventRecorder = broadcaster.NewRecorder(scheme.Scheme, corev1.EventSource{Component: OperatorName})
 	return nil
 }
 
