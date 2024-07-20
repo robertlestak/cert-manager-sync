@@ -16,6 +16,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+    - id: go
+      uses: actions/setup-go@v2
+      with:
+        go-version: 1.22.5
+    - id: govulncheck
+      uses: golang/govulncheck-action@v1
     - name: Set up QEMU
       uses: docker/setup-qemu-action@v3
     - name: Set up Docker Buildx
