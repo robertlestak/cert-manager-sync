@@ -111,9 +111,15 @@ func (s *IncapsulaStore) UploadIncapsulaCert(cert *tlssecret.Certificate) error 
 		l.WithError(berr).Errorf("io.ReadAll error")
 		return berr
 	}
+	if res.StatusCode != 200 {
+		l.Debugf("status=%v body=%s", res.StatusCode, string(bd))
+		return fmt.Errorf("incapsula upload failed, incapsulaSecretNamespace=%s incapsulaSecret=%s statusCode=%d", s.SecretNamespace, s.SecretName, res.StatusCode)
+	}
 	ir := &IncapsulaResponse{}
 	if err = json.Unmarshal(bd, ir); err != nil {
 		l.WithError(err).Errorf("json.Unmarshal error")
+		// debug dump the response
+		l.Debugf("status=%v body=%s", res.StatusCode, string(bd))
 		return err
 	}
 	l.Debugf("incapsula statusCode=%d response=%v", res.StatusCode, string(bd))
