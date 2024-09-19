@@ -126,6 +126,10 @@ func hashSecret(s *corev1.Secret) string {
 		if strings.HasPrefix(k, OperatorName) && k != OperatorName+"/hash" {
 			annotationsMap[k] = v
 		}
+		// also remove the failed-sync-attempts and next-retry annotations
+		if k == OperatorName+"/failed-sync-attempts" || k == OperatorName+"/next-retry" {
+			delete(annotationsMap, k)
+		}
 	}
 	jd, err = json.Marshal(annotationsMap)
 	if err != nil {

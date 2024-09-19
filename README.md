@@ -368,7 +368,6 @@ kubectl apply -f devops/k8s
 The operator can be deployed as-is with no additional configuration. However, you can configure the following environment variables to customize the operator:
 
 ```bash
-INCAPSULA_API=https://my.imperva.com/api/prov/v1 # Incapsula API URL
 DISABLED_NAMESPACES= # csv of namespaces to ignore. default is empty (all namespaces are watched)
 ENABLED_NAMESPACES= # csv of namespaces to watch. default is empty (all namespaces are watched)
 SECRETS_NAMESPACE= # DEPRECATED, replaced by ENABLED_NAMESPACES. Namespace to look for secrets in. overrides ENABLED_NAMESPACES if set

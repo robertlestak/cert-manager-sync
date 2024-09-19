@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 
 	"github.com/robertlestak/cert-manager-sync/pkg/state"
@@ -23,14 +22,9 @@ type IncapsulaStore struct {
 	ID              string `json:"api_id"`
 	SiteID          string `json:"site_id"`
 	Key             string `json:"api_key"`
+	AuthType        string `json:"auth_type"`
 	SecretName      string
 	SecretNamespace string
-}
-
-func impervaApiBase() string {
-	fromEnv := cmp.Or(os.Getenv("INCAPSULA_API"), os.Getenv("IMPERVA_API"))
-	fromEnv = cmp.Or(fromEnv, "https://my.imperva.com/api/prov/v1")
-	return fromEnv
 }
 
 func (s *IncapsulaStore) GetApiKey(ctx context.Context) error {
@@ -58,6 +52,11 @@ func (s *IncapsulaStore) ParseCertificate(c *tlssecret.Certificate) error {
 	if c.Annotations[state.OperatorName+"/incapsula-secret-name"] != "" {
 		s.SecretName = c.Annotations[state.OperatorName+"/incapsula-secret-name"]
 	}
+	if c.Annotations[state.OperatorName+"/incapsula-auth-type"] != "" {
+		s.AuthType = c.Annotations[state.OperatorName+"/incapsula-auth-type"]
+	} else {
+		s.AuthType = "RSA"
+	}
 	// if secret name is in the format of "namespace/secretname" then parse it
 	if strings.Contains(s.SecretName, "/") {
 		s.SecretNamespace = strings.Split(s.SecretName, "/")[0]
@@ -70,6 +69,13 @@ func (s *IncapsulaStore) ParseCertificate(c *tlssecret.Certificate) error {
 type IncapsulaResponse struct {
 	Res        int    `json:"res"`
 	ResMessage string `json:"res_message"`
+}
+
+type ImpervaCertUpload struct {
+	Certificate string `json:"certificate"`
+	PrivateKey  string `json:"private_key"`
+	Passphrase  string `json:"passphrase,omitempty"`
+	AuthType    string `json:"auth_type"`
 }
 
 // UploadIncapsulaCert syncs a certificate with Incapsula site
@@ -85,21 +91,26 @@ func (s *IncapsulaStore) UploadIncapsulaCert(cert *tlssecret.Certificate) error 
 	bCert := base64.StdEncoding.EncodeToString(cert.FullChain())
 	bKey := base64.StdEncoding.EncodeToString(cert.Key)
 	c := http.Client{}
-	iurl := impervaApiBase() + "/sites/customCertificate/upload"
-	data := url.Values{}
-	data.Set("site_id", s.SiteID)
-	data.Set("certificate", bCert)
-	data.Set("private_key", bKey)
-	d := strings.NewReader(data.Encode())
-	l.Debugf("url=%s data=%s", iurl, data.Encode())
-	req, rerr := http.NewRequest("POST", iurl, d)
+	iurl := "https://my.imperva.com/api/prov/v2/sites/" + s.SiteID + "/customCertificate"
+	up := &ImpervaCertUpload{
+		Certificate: bCert,
+		PrivateKey:  bKey,
+		AuthType:    cmp.Or(s.AuthType, "RSA"),
+	}
+	jd, err := json.Marshal(up)
+	if err != nil {
+		l.WithError(err).Errorf("json.Marshal error")
+		return err
+	}
+	l.Debugf("url=%s data=%s", iurl, string(jd))
+	req, rerr := http.NewRequest("PUT", iurl, strings.NewReader(string(jd)))
 	if rerr != nil {
 		l.WithError(rerr).Errorf("http.NewRequest error")
 		return rerr
 	}
 	req.Header.Set("x-api-id", s.ID)
 	req.Header.Set("x-api-key", s.Key)
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Content-Type", "application/json")
 	res, serr := c.Do(req)
 	if serr != nil {
 		l.WithError(serr).Errorf("c.Do error=%v", serr)
@@ -140,7 +151,7 @@ func (s *IncapsulaStore) GetIncapsulaSiteStatus() (string, error) {
 	)
 	l.Debugf("GetIncapsulaSiteStatus")
 	var err error
-	iurl := impervaApiBase() + "/sites/status"
+	iurl := "https://my.imperva.com/api/prov/v1/sites/status"
 	c := http.Client{}
 	data := url.Values{}
 	data.Set("site_id", s.SiteID)
