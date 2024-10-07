@@ -211,3 +211,68 @@ func TestRetryLogic(t *testing.T) {
 		})
 	}
 }
+
+func TestCalculateNextRetryTime(t *testing.T) {
+	tests := []struct {
+		name          string
+		secret        *corev1.Secret
+		expectedDelay time.Duration
+	}{
+		{
+			name: "Initial retry",
+			secret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "test-secret",
+					Annotations: map[string]string{},
+				},
+			},
+			expectedDelay: 1 * time.Minute,
+		},
+		{
+			name: "Second retry",
+			secret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-secret",
+					Annotations: map[string]string{
+						state.OperatorName + "/failed-sync-attempts": "1",
+					},
+				},
+			},
+			expectedDelay: 2 * time.Minute,
+		},
+		{
+			name: "Third retry",
+			secret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-secret",
+					Annotations: map[string]string{
+						state.OperatorName + "/failed-sync-attempts": "2",
+					},
+				},
+			},
+			expectedDelay: 4 * time.Minute,
+		},
+		{
+			name: "Max retry delay",
+			secret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-secret",
+					Annotations: map[string]string{
+						state.OperatorName + "/failed-sync-attempts": "999999999",
+					},
+				},
+			},
+			expectedDelay: 32 * time.Hour,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			startTime := time.Now()
+			nextRetryTime := calculateNextRetryTime(tt.secret)
+			expectedNextRetryTime := startTime.Add(tt.expectedDelay)
+			// Allow a small margin for timing differences
+			assert.WithinDuration(t, expectedNextRetryTime, nextRetryTime, time.Minute)
+		})
+	}
+}

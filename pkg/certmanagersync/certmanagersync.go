@@ -160,6 +160,28 @@ func readyToRetry(s *corev1.Secret) bool {
 	return false
 }
 
+func calculateNextRetryTime(secret *corev1.Secret) time.Time {
+	// Get the number of failed sync attempts from the annotations
+	retries := consumedRetries(secret)
+
+	// Calculate the delay using binary exponential backoff
+	var delay time.Duration
+	if retries < 31 {
+		delay = time.Duration(1<<uint(retries)) * time.Minute
+	} else {
+		delay = 32 * time.Hour
+	}
+
+	// Cap the delay at 32 hours
+	if delay > 32*time.Hour {
+		delay = 32 * time.Hour
+	}
+
+	// Calculate the next retry time
+	nextRetryTime := time.Now().Add(delay)
+	return nextRetryTime
+}
+
 func incrementRetries(secretNamespace, secretName string) error {
 	l := log.WithFields(log.Fields{
 		"action": "incrementRetries",
@@ -181,11 +203,7 @@ func incrementRetries(secretNamespace, secretName string) error {
 	secret.Annotations[state.OperatorName+"/failed-sync-attempts"] = strconv.Itoa(iv)
 	// set the next-retry annotation to the current time plus the delay
 	// the delay is a binary exponential backoff, starting at 1 minute, then 2, 4, 8.. up to 32 hours
-	delay := time.Duration(1<<uint(iv-1)) * time.Minute
-	if delay > 32*time.Hour {
-		delay = 32 * time.Hour
-	}
-	nextRetry := time.Now().Add(delay).Format(time.RFC3339)
+	nextRetry := calculateNextRetryTime(secret)
 	l = l.WithFields(log.Fields{
 		"failed-sync-attempts": iv,
 		"next-retry":           nextRetry,
@@ -196,7 +214,7 @@ func incrementRetries(secretNamespace, secretName string) error {
 	uo := metav1.UpdateOptions{
 		FieldManager: state.OperatorName,
 	}
-	secret.Annotations[state.OperatorName+"/next-retry"] = nextRetry
+	secret.Annotations[state.OperatorName+"/next-retry"] = nextRetry.Format(time.RFC3339)
 	_, err = state.KubeClient.CoreV1().Secrets(secretNamespace).Update(context.Background(), secret, uo)
 	if err != nil {
 		l.WithError(err).Errorf("Update secret error")
