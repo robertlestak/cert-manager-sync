@@ -229,7 +229,7 @@ func (s *ACMStore) Update(secret *corev1.Secret) error {
 		return cerr
 	}
 	l = l.WithFields(log.Fields{
-		"arn": s.CertificateArn,
+		"id": s.CertificateArn,
 	})
 	if origArn != s.CertificateArn {
 		// update the secret to reflect the new arn
@@ -244,7 +244,7 @@ func (s *ACMStore) Update(secret *corev1.Secret) error {
 			uo,
 		)
 		if uerr != nil {
-			l.WithError(uerr).Errorf("secret.Update error")
+			l.WithError(uerr).Errorf("sync error")
 			return uerr
 		}
 	}

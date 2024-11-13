@@ -74,7 +74,7 @@ func (s *ThreatXStore) GetAPIKey(ctx context.Context) error {
 		"func":    "ThreatXStore.GetAPIKey",
 		"context": ctx,
 	})
-	l.Info("start")
+	l.Debug("start")
 	gopt := metav1.GetOptions{}
 	sc, err := state.KubeClient.CoreV1().Secrets(s.SecretNamespace).Get(ctx, s.SecretName, gopt)
 	if err != nil {
@@ -82,7 +82,7 @@ func (s *ThreatXStore) GetAPIKey(ctx context.Context) error {
 	}
 	s.APIToken = string(sc.Data["api_token"])
 	s.CustomerName = string(sc.Data["customer_name"])
-	l.Info("end")
+	l.Debug("end")
 	return nil
 }
 
@@ -95,7 +95,7 @@ func (s *ThreatXStore) ThreatxLogin(ctx context.Context) error {
 	l := log.WithFields(log.Fields{
 		"action": "ThreatxLogin",
 	})
-	l.Info("start")
+	l.Debug("start")
 	var e error
 	var r struct {
 		Command  string `json:"command"`
@@ -215,7 +215,7 @@ func (s *ThreatXStore) UpdateSite(ctx context.Context, tx ThreatXSite) error {
 	l := log.WithFields(log.Fields{
 		"func": "ThreatXStore.UpdateSite",
 	})
-	l.Info("start")
+	l.Debug("start")
 	if s.AuthToken == "" {
 		l.Error("auth_token is empty")
 		return errors.New("auth_token is empty")
@@ -293,14 +293,14 @@ func (s *ThreatXStore) Update(secret *corev1.Secret) error {
 		"secretName":      secret.ObjectMeta.Name,
 		"secretNamespace": secret.ObjectMeta.Namespace,
 	})
-	l.Info("start")
+	l.Debug("start")
 	cert := tlssecret.ParseSecret(secret)
 	if err := s.ParseCertificate(cert); err != nil {
 		l.Error(err)
 		return err
 	}
 	l = l.WithFields(log.Fields{
-		"hostname": s.Hostname,
+		"id": s.Hostname,
 	})
 	ctx := context.Background()
 	if err := s.GetAPIKey(ctx); err != nil {
@@ -319,7 +319,7 @@ func (s *ThreatXStore) Update(secret *corev1.Secret) error {
 	site.SslBlob = string(cert.FullChain()) + string(cert.Key)
 	site.SslEnabled = true
 	if err := s.UpdateSite(ctx, site); err != nil {
-		l.Error(err)
+		l.WithError(err).Error("sync error")
 		return err
 	}
 	l.Info("certificate synced")

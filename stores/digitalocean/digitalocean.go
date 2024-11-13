@@ -122,7 +122,7 @@ func (s *DigitalOceanStore) Update(secret *corev1.Secret) error {
 		l.WithError(err).Errorf("cannot create certificate")
 		return err
 	}
-	l.WithField("name", certificate.ID).Debugf("certificate created")
+	l = l.WithField("id", certificate.ID)
 	s.CertId = certificate.ID
 	if origCertId != s.CertId {
 		secret.ObjectMeta.Annotations[state.OperatorName+"/digitalocean-cert-id"] = s.CertId
@@ -136,7 +136,7 @@ func (s *DigitalOceanStore) Update(secret *corev1.Secret) error {
 			uo,
 		)
 		if uerr != nil {
-			l.WithError(uerr).Errorf("secret.Update error")
+			l.WithError(uerr).Errorf("sync error")
 			return uerr
 		}
 	}

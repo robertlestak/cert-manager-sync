@@ -197,12 +197,19 @@ func (s *VaultStore) Update(secret *corev1.Secret) error {
 		l.WithError(err).Errorf("vault.ParseCertificate error")
 		return err
 	}
+	var vid string
+	if s.Namespace != "" {
+		vid = fmt.Sprintf("%s %s/%s", s.Addr, s.Namespace, s.Path)
+	} else {
+		vid = fmt.Sprintf("%s %s", s.Addr, s.Path)
+	}
 	l = l.WithFields(log.Fields{
 		"vaultPath":       s.Path,
 		"vaultAddr":       s.Addr,
 		"vaultNamespace":  s.Namespace,
 		"vaultRole":       s.Role,
 		"vaultAuthMethod": s.AuthMethod,
+		"id":              vid,
 	})
 	_, cerr := s.NewClient()
 	if cerr != nil {
@@ -230,7 +237,7 @@ func (s *VaultStore) Update(secret *corev1.Secret) error {
 	}
 	_, err = s.WriteSecret(cd)
 	if err != nil {
-		l.WithError(err).Errorf("vault.WriteSecret error")
+		l.WithError(err).Errorf("sync error")
 		return err
 	}
 	l.Info("certificate synced")

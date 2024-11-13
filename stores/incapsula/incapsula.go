@@ -208,20 +208,23 @@ func (s *IncapsulaStore) Update(secret *corev1.Secret) error {
 		s.SecretNamespace = secret.Namespace
 	}
 	l = l.WithFields(log.Fields{
-		"siteID": s.SiteID,
+		"id": s.SiteID,
 	})
 	ctx := context.Background()
 	if err := s.GetApiKey(ctx); err != nil {
 		l.WithError(err).Errorf("incapsula.GetApiKey error")
+		l.WithError(err).Errorf("sync error")
 		return err
 	}
 	_, err := s.GetIncapsulaSiteStatus()
 	if err != nil {
 		l.WithError(err).Errorf("incapsula.GetIncapsulaSiteStatus error")
+		l.WithError(err).Errorf("sync error")
 		return err
 	}
 	if err := s.UploadIncapsulaCert(c); err != nil {
 		l.WithError(err).Errorf("incapsula.UploadIncapsulaCert error")
+		l.WithError(err).Errorf("sync error")
 		return err
 	}
 	l.Info("certificate synced")

@@ -113,6 +113,9 @@ func (s *HerokuStore) Update(secret *corev1.Secret) error {
 		l.Debugf("heroku.SniEndpointUpdate success: %s", ep.Name)
 		s.CertName = ep.Name
 	}
+	l = l.WithFields(log.Fields{
+		"id": s.CertName,
+	})
 	if origCertName != s.CertName {
 		secret.ObjectMeta.Annotations[state.OperatorName+"/heroku-cert-name"] = s.CertName
 		sc := state.KubeClient.CoreV1().Secrets(secret.ObjectMeta.Namespace)
@@ -125,7 +128,7 @@ func (s *HerokuStore) Update(secret *corev1.Secret) error {
 			uo,
 		)
 		if uerr != nil {
-			l.WithError(uerr).Errorf("secret.Update error")
+			l.WithError(uerr).Errorf("sync error")
 			return uerr
 		}
 	}

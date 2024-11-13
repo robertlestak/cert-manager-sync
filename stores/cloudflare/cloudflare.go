@@ -110,7 +110,7 @@ func (s *CloudflareStore) Update(secret *corev1.Secret) error {
 		}
 	}
 	s.CertId = sslCert.ID
-	l.WithField("id", sslCert.ID).Debugf("certificate synced")
+	l = l.WithField("id", sslCert.ID)
 	if origCertId != s.CertId {
 		secret.ObjectMeta.Annotations[state.OperatorName+"/cloudflare-cert-id"] = s.CertId
 		sc := state.KubeClient.CoreV1().Secrets(secret.ObjectMeta.Namespace)
@@ -123,7 +123,7 @@ func (s *CloudflareStore) Update(secret *corev1.Secret) error {
 			uo,
 		)
 		if uerr != nil {
-			l.WithError(uerr).Errorf("secret.Update error")
+			l.WithError(uerr).Errorf("sync error")
 			return uerr
 		}
 	}

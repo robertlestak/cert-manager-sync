@@ -164,6 +164,9 @@ func (s *GCPStore) Update(secret *corev1.Secret) error {
 		return err
 	}
 	s.client = client
+	l = l.WithFields(log.Fields{
+		"id": s.CertificateName,
+	})
 	// if there is no secret name, this is the first time we are sending to GCP, create
 	if secret.ObjectMeta.Annotations[state.OperatorName+"/gcp-certificate-name"] == "" {
 		err = s.CreateCert(ctx, gcert)
@@ -181,19 +184,17 @@ func (s *GCPStore) Update(secret *corev1.Secret) error {
 			uo,
 		)
 		if uerr != nil {
-			l.WithError(uerr).Errorf("secret.Update error")
+			l.WithError(uerr).Errorf("sync error")
 			return uerr
 		}
 	} else {
 		// secret already has an GCP cert attached, update
 		err = s.UpdateCert(ctx, gcert)
 		if err != nil {
-			l.WithError(err).Errorf("vault.WriteSecret error")
+			l.WithError(err).Errorf("sync error")
 			return err
 		}
 	}
-	l.WithFields(log.Fields{
-		"certificateName": s.CertificateName,
-	}).Info("certificate synced")
+	l.Info("certificate synced")
 	return nil
 }

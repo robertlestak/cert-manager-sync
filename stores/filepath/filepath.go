@@ -73,17 +73,20 @@ func (s *FilepathStore) Update(secret *corev1.Secret) error {
 	certPath := fp.Join(s.Directory, s.CertFile)
 	keyPath := fp.Join(s.Directory, s.KeyFile)
 	caPath := fp.Join(s.Directory, s.CAFile)
+	l = l.WithFields(log.Fields{
+		"id": certPath,
+	})
 	if err := os.WriteFile(certPath, c.Certificate, 0644); err != nil {
-		l.WithError(err).Errorf("WriteFile error")
+		l.WithError(err).Errorf("sync error")
 		return err
 	}
 	if err := os.WriteFile(keyPath, c.Key, 0644); err != nil {
-		l.WithError(err).Errorf("WriteFile error")
+		l.WithError(err).Errorf("sync error")
 		return err
 	}
 	if len(c.Ca) > 0 {
 		if err := os.WriteFile(caPath, c.Ca, 0644); err != nil {
-			l.WithError(err).Errorf("WriteFile error")
+			l.WithError(err).Errorf("sync error")
 			return err
 		}
 	}
