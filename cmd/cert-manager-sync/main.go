@@ -20,6 +20,9 @@ func init() {
 		ll = log.InfoLevel
 	}
 	log.SetLevel(ll)
+	if os.Getenv("LOG_FORMAT") == "json" {
+		log.SetFormatter(&log.JSONFormatter{})
+	}
 	l := log.WithFields(
 		log.Fields{
 			"action": "init",
