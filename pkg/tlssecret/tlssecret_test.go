@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/base64"
 	"encoding/pem"
 	"fmt"
 	"math/big"
@@ -174,55 +173,6 @@ func TestFullChain(t *testing.T) {
 			_, err := x509.ParseCertificate(certPEM.Bytes)
 			if err != nil {
 				t.Errorf("Failed to parse certificate: %v", err)
-			}
-		})
-	}
-}
-
-func TestCertificate_Base64Decode(t *testing.T) {
-	tests := []struct {
-		name    string
-		cert    *Certificate
-		wantErr bool
-	}{
-		{
-			name: "All fields encoded correctly",
-			cert: &Certificate{
-				Ca:          []byte(base64.StdEncoding.EncodeToString([]byte("CA Data"))),
-				Certificate: []byte(base64.StdEncoding.EncodeToString([]byte("Certificate Data"))),
-				Key:         []byte(base64.StdEncoding.EncodeToString([]byte("Key Data"))),
-			},
-			wantErr: false,
-		},
-		{
-			name: "Certificate field encoded incorrectly",
-			cert: &Certificate{
-				Ca:          []byte(base64.StdEncoding.EncodeToString([]byte("CA Data"))),
-				Certificate: []byte("Not Base64"),
-				Key:         []byte(base64.StdEncoding.EncodeToString([]byte("Key Data"))),
-			},
-			wantErr: true,
-		},
-		{
-			name:    "All fields nil",
-			cert:    &Certificate{},
-			wantErr: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := tt.cert.Base64Decode()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Certificate.Base64Decode() error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if !tt.wantErr {
-				// For the successful case, verify the decoded data
-				if tt.name == "All fields encoded correctly" {
-					if string(tt.cert.Ca) != "CA Data" || string(tt.cert.Certificate) != "Certificate Data" || string(tt.cert.Key) != "Key Data" {
-						t.Errorf("Certificate.Base64Decode() did not decode correctly")
-					}
-				}
 			}
 		})
 	}

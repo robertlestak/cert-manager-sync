@@ -184,6 +184,13 @@ func (s *VaultStore) ParseCertificate(c *tlssecret.Certificate) error {
 	return nil
 }
 
+func writeSecretValue(value []byte, asString bool) any {
+	if asString {
+		return string(value)
+	}
+	return value
+}
+
 func (s *VaultStore) Update(secret *corev1.Secret) error {
 	l := log.WithFields(log.Fields{
 		"action":          "Update",
@@ -221,19 +228,14 @@ func (s *VaultStore) Update(secret *corev1.Secret) error {
 		l.WithError(err).Errorf("vault.NewToken error")
 		return err
 	}
-	if s.Base64Decode {
-		if err := c.Base64Decode(); err != nil {
-			l.WithError(err).Errorf("Base64Decode error")
-			return err
-		}
-	}
 	cd := map[string]interface{}{
-		"tls.crt": c.Certificate,
-		"tls.key": c.Key,
+		"tls.crt": writeSecretValue(c.Certificate, s.Base64Decode),
+		"tls.key": writeSecretValue(c.Key, s.Base64Decode),
 	}
+
 	// if there is a CA, add it to the secret
 	if len(c.Ca) > 0 {
-		cd["ca.crt"] = c.Ca
+		cd["ca.crt"] = writeSecretValue(c.Ca, s.Base64Decode)
 	}
 	_, err = s.WriteSecret(cd)
 	if err != nil {

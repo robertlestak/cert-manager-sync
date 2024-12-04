@@ -1,9 +1,6 @@
 package tlssecret
 
 import (
-	"encoding/base64"
-
-	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -36,33 +33,4 @@ func (c *Certificate) FullChain() []byte {
 		return append(append(c.Certificate, '\n'), c.Ca...)
 	}
 	return c.Certificate
-}
-
-func (c *Certificate) Base64Decode() error {
-	l := log.WithFields(log.Fields{
-		"action": "Base64Decode",
-	})
-	var err error
-	if c.Ca != nil {
-		c.Ca, err = base64.StdEncoding.DecodeString(string(c.Ca))
-		if err != nil {
-			l.WithError(err).Errorf("error decoding ca")
-			return err
-		}
-	}
-	if c.Certificate != nil {
-		c.Certificate, err = base64.StdEncoding.DecodeString(string(c.Certificate))
-		if err != nil {
-			l.WithError(err).Errorf("error decoding certificate")
-			return err
-		}
-	}
-	if c.Key != nil {
-		c.Key, err = base64.StdEncoding.DecodeString(string(c.Key))
-		if err != nil {
-			l.WithError(err).Errorf("error decoding key")
-			return err
-		}
-	}
-	return nil
 }
