@@ -1,8 +1,11 @@
+{{- if .Values.clusterRole.create -}}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: cert-manager-sync
+  name: {{ include "cert-manager-sync.fullname" . }}
+  labels:
+    {{- include "cert-manager-sync.labels" . | nindent 4 }}
 rules:
 - apiGroups: [""]
   resources: ["secrets"]
@@ -15,12 +18,13 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: cert-manager-sync
+  name: {{ include "cert-manager-sync.fullname" . }}
 subjects:
 - kind: ServiceAccount
-  name: cert-manager-sync
-  namespace: cert-manager
+  name: {{ include "cert-manager-sync.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
 roleRef:
   kind: ClusterRole
-  name: cert-manager-sync
+  name: {{ include "cert-manager-sync.fullname" . }}
   apiGroup: rbac.authorization.k8s.io
+{{- end }}

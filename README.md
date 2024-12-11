@@ -355,12 +355,10 @@ spec:
 
 ## Deployment
 
-If you are using EKS IRSA or GKE Workload Identity, update `devops/k8s/sa.yaml` with the appropriate role or service account details.
-
 Deploy the operator:
 
 ```bash
-kubectl apply -f devops/k8s
+helm upgrade --install -n cert-manager cert-manager-sync ./deploy/cert-manager-sync
 ```
 
 ### Optional Operator Configuration
@@ -378,12 +376,21 @@ METRICS_PORT=9090 # Metrics port
 ENABLE_METRICS=true # Enable metrics server
 ```
 
-You can store these in a `cert-manager-sync` secret in the same namespace `cert-manager-sync` is deployed in (default is `cert-manager`) and it will be picked up by the operator.
+If deploying with helm, these are exposed as values in the `values.yaml` file.
 
-```bash
-kubectl -n cert-manager \
-  create secret generic cert-manager-sync \
-  --from-literal=LOG_LEVEL=debug
+```yaml
+config:
+  operatorName: cert-manager-sync.lestak.sh
+  secretsNamespace: ""
+  disabledNamespaces: ""
+  enabledNamespaces: ""
+  logLevel: "info"
+  logFormat: "json"
+  disableCache: "false"
+
+metrics:
+  enabled: false
+  port: 9090
 ```
 
 ## Monitoring

@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cert-manager-sync.fullname" . }}
+  labels:
+    {{- include "cert-manager-sync.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "cert-manager-sync.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- if .Values.Metrics.enabled }}
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.Metrics.port }}"
+        {{- end }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "cert-manager-sync.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "cert-manager-sync.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          env:
+          - name: OPERATOR_NAME
+            value: {{ .Values.config.operatorName }}
+          - name: SECRETS_NAMESPACE
+            value: {{ .Values.config.secretsNamespace }}
+          - name: DISABLED_NAMESPACES
+            value: {{ .Values.config.disabledNamespaces }}
+          - name: ENABLED_NAMESPACES
+            value: {{ .Values.config.enabledNamespaces }}
+          - name: LOG_LEVEL
+            value: {{ .Values.config.logLevel }}
+          - name: LOG_FORMAT
+            value: {{ .Values.config.logFormat }}
+          - name: CACHE_DISABLE
+            value: {{ .Values.config.disableCache }}
+          - name: ENABLE_METRICS
+            value: {{ .Values.metrics.enabled }}
+          - name: METRICS_PORT
+            value: {{ .Values.metrics.port }}
+          {{- with .Values.env }}
+          {{- toYaml . | nindent 10 }}
+          {{- end }}
+          {{- if .Values.metrics.enabled }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+              protocol: TCP
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
