@@ -42,22 +42,28 @@ spec:
           env:
           - name: OPERATOR_NAME
             value: {{ .Values.config.operatorName }}
+          {{- if .Values.config.secretsNamespace }}
           - name: SECRETS_NAMESPACE
             value: {{ .Values.config.secretsNamespace }}
+          {{- end }}
+          {{- if .Values.config.disabledNamespaces }}
           - name: DISABLED_NAMESPACES
             value: {{ .Values.config.disabledNamespaces }}
+          {{- end }}
+          {{- if .Values.config.enabledNamespaces }}
           - name: ENABLED_NAMESPACES
             value: {{ .Values.config.enabledNamespaces }}
+          {{- end }}
           - name: LOG_LEVEL
             value: {{ .Values.config.logLevel }}
           - name: LOG_FORMAT
             value: {{ .Values.config.logFormat }}
           - name: CACHE_DISABLE
-            value: {{ .Values.config.disableCache }}
+            value: {{ .Values.config.disableCache | quote }}
           - name: ENABLE_METRICS
-            value: {{ .Values.metrics.enabled }}
+            value: {{ .Values.metrics.enabled | quote }}
           - name: METRICS_PORT
-            value: {{ .Values.metrics.port }}
+            value: {{ .Values.metrics.port | quote }}
           {{- with .Values.env }}
           {{- toYaml . | nindent 10 }}
           {{- end }}
