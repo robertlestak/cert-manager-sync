@@ -1,11 +1,9 @@
 package state
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -13,7 +11,6 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -28,42 +25,6 @@ var (
 	KubeClient    *kubernetes.Clientset
 	EventRecorder record.EventRecorder
 )
-
-func addHashAnnotation(secretNamespace, secretName, hash string) error {
-	l := log.WithFields(log.Fields{
-		"action": "incrementRetries",
-		"secret": fmt.Sprintf("%s/%s", secretNamespace, secretName),
-		"hash":   hash,
-	})
-	l.Debugf("incrementRetries %s/%s", secretNamespace, secretName)
-	// get the secret from k8s, since we don't know if data has been changed by a store
-	if KubeClient == nil {
-		l.Debugf("KubeClient is nil")
-		return fmt.Errorf("KubeClient is nil")
-	}
-	gopt := metav1.GetOptions{}
-	secret, err := KubeClient.CoreV1().Secrets(secretNamespace).Get(context.Background(), secretName, gopt)
-	if err != nil {
-		l.WithError(err).Errorf("Get error")
-		EventRecorder.Eventf(secret, corev1.EventTypeWarning, "GetError", "Error getting secret: %v", err)
-		return err
-	}
-	if secret.Annotations == nil {
-		secret.Annotations = make(map[string]string)
-	}
-	secret.Annotations[OperatorName+"/hash"] = hash
-	uo := metav1.UpdateOptions{
-		FieldManager: OperatorName,
-	}
-	_, err = KubeClient.CoreV1().Secrets(secretNamespace).Update(context.Background(), secret, uo)
-	if err != nil {
-		l.WithError(err).Errorf("Update secret error")
-		EventRecorder.Eventf(secret, corev1.EventTypeWarning, "UpdateError", "Error updating secret: %v", err)
-		return err
-	}
-	l.Debugf("incremented retries")
-	return nil
-}
 
 // kvPair represents a key-value pair.
 type kvPair struct {
@@ -97,7 +58,7 @@ func hashMapValues(m map[string]any) (string, error) {
 	return hex.EncodeToString(hash[:]), nil
 }
 
-func hashSecret(s *corev1.Secret) string {
+func HashSecret(s *corev1.Secret) string {
 	l := log.WithFields(log.Fields{
 		"action": "hashSecret",
 	})
@@ -167,33 +128,6 @@ func cmsHash(s *corev1.Secret) string {
 	return cmsHash
 }
 
-func cacheSecret(s *corev1.Secret) error {
-	l := log.WithFields(
-		log.Fields{
-			"action": "cacheSecret",
-		},
-	)
-	l.Debug("caching secret")
-	sHash := hashSecret(s)
-	if err := addHashAnnotation(s.Namespace, s.Name, sHash); err != nil {
-		l.WithError(err).Errorf("addHashAnnotation error")
-		return err
-	}
-	return nil
-}
-
-func Cache(s *corev1.Secret) error {
-	l := log.WithFields(
-		log.Fields{
-			"action":     "Cache",
-			"secretName": s.ObjectMeta.Name,
-			"namespace":  s.ObjectMeta.Namespace,
-		},
-	)
-	l.Debug("caching secret")
-	return cacheSecret(s)
-}
-
 func CacheChanged(s *corev1.Secret) bool {
 	l := log.WithFields(
 		log.Fields{
@@ -206,7 +140,7 @@ func CacheChanged(s *corev1.Secret) bool {
 		l.Debug("cache disabled")
 		return true
 	}
-	secretHash := hashSecret(s)
+	secretHash := HashSecret(s)
 	existingHash := cmsHash(s)
 	l = l.WithFields(log.Fields{
 		"secretHash":   secretHash,
@@ -308,8 +242,8 @@ func SecretWatched(s *corev1.Secret) bool {
 			"namespace": s.ObjectMeta.Namespace,
 		})
 	l.Trace("checking if secret is watched")
-	if s.Annotations[OperatorName+"/sync-enabled"] != "true" {
-		l.Trace("sync-enabled not true")
+	if s.Annotations[OperatorName+"/sync-enabled"] != "true" && s.Annotations[OperatorName+"/enabled"] != "true" {
+		l.Trace("enabled not true")
 		return false
 	}
 	if namespaceDisabled(s.Namespace) {

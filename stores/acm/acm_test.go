@@ -11,9 +11,6 @@ import (
 	"math/big"
 	"testing"
 	"time"
-
-	"github.com/robertlestak/cert-manager-sync/pkg/state"
-	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
 )
 
 // GenerateKey generates an ECDSA private key.
@@ -137,46 +134,6 @@ func TestSeparateCertsACM(t *testing.T) {
 					t.Errorf("Failed to parse certificate chain: %v", err)
 					return
 				}
-			}
-		})
-	}
-}
-
-func TestParseCertificate(t *testing.T) {
-	tests := []struct {
-		name        string
-		certificate *tlssecret.Certificate
-		want        *ACMStore
-	}{
-		{
-			name: "Test with valid annotations",
-			certificate: &tlssecret.Certificate{
-				Annotations: map[string]string{
-					state.OperatorName + "/acm-role-arn":        "test-role-arn",
-					state.OperatorName + "/acm-region":          "test-region",
-					state.OperatorName + "/acm-certificate-arn": "test-certificate-arn",
-					state.OperatorName + "/acm-secret-name":     "namespace/secret-name",
-				},
-			},
-			want: &ACMStore{
-				RoleArn:         "test-role-arn",
-				Region:          "test-region",
-				CertificateArn:  "test-certificate-arn",
-				SecretName:      "secret-name",
-				SecretNamespace: "namespace",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			as := &ACMStore{}
-			if err := as.ParseCertificate(tt.certificate); err != nil {
-				t.Errorf("ParseCertificate() error = %v", err)
-				return
-			}
-			if as.RoleArn != tt.want.RoleArn || as.Region != tt.want.Region || as.CertificateArn != tt.want.CertificateArn || as.SecretName != tt.want.SecretName || as.SecretNamespace != tt.want.SecretNamespace {
-				t.Errorf("ParseCertificate() = %v, want %v", as, tt.want)
 			}
 		})
 	}

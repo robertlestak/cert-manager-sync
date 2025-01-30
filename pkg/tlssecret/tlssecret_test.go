@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/robertlestak/cert-manager-sync/pkg/state"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -27,10 +28,11 @@ func TestParseSecret(t *testing.T) {
 			name: "Test with a valid secret",
 			secret: &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:        "test-secret",
-					Namespace:   "test-namespace",
-					Annotations: map[string]string{"annotation-key": "annotation-value"},
-					Labels:      map[string]string{"label-key": "label-value"},
+					Name:      "test-secret",
+					Namespace: "test-namespace",
+					Annotations: map[string]string{
+						state.OperatorName + "/acm-key1": "value1",
+					},
 				},
 				Data: map[string][]byte{
 					"ca.crt":  []byte("test-ca"),
@@ -41,11 +43,55 @@ func TestParseSecret(t *testing.T) {
 			want: &Certificate{
 				SecretName:  "test-secret",
 				Namespace:   "test-namespace",
-				Annotations: map[string]string{"annotation-key": "annotation-value"},
-				Labels:      map[string]string{"label-key": "label-value"},
 				Ca:          []byte("test-ca"),
 				Certificate: []byte("test-crt"),
 				Key:         []byte("test-key"),
+				Syncs: []*GenericSecretSyncConfig{
+					{
+						Config: map[string]string{"key1": "value1"},
+						Store:  "acm",
+						Index:  -1,
+					},
+				},
+			},
+		},
+		{
+			name: "Test with a valid secret with multiple annotations",
+			secret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-secret",
+					Namespace: "test-namespace",
+					Annotations: map[string]string{
+						state.OperatorName + "/acm-key1":   "value1",
+						state.OperatorName + "/acm-key2":   "value2",
+						state.OperatorName + "/acm-key1.0": "value1.0",
+						state.OperatorName + "/acm-key2.0": "value2.0",
+					},
+				},
+				Data: map[string][]byte{
+					"ca.crt":  []byte("test-ca"),
+					"tls.crt": []byte("test-crt"),
+					"tls.key": []byte("test-key"),
+				},
+			},
+			want: &Certificate{
+				SecretName:  "test-secret",
+				Namespace:   "test-namespace",
+				Ca:          []byte("test-ca"),
+				Certificate: []byte("test-crt"),
+				Key:         []byte("test-key"),
+				Syncs: []*GenericSecretSyncConfig{
+					{
+						Config: map[string]string{"key1": "value1", "key2": "value2"},
+						Store:  "acm",
+						Index:  -1,
+					},
+					{
+						Config: map[string]string{"key1": "value1.0", "key2": "value2.0"},
+						Store:  "acm",
+						Index:  0,
+					},
+				},
 			},
 		},
 	}

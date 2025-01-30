@@ -16,7 +16,6 @@ import (
 	"github.com/robertlestak/cert-manager-sync/pkg/state"
 	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
 	log "github.com/sirupsen/logrus"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -134,31 +133,6 @@ func (s *ACMStore) replicateACMCert(ai *acm.ImportCertificateInput) error {
 	return nil
 }
 
-func (s *ACMStore) ParseCertificate(c *tlssecret.Certificate) error {
-	l := log.WithFields(log.Fields{
-		"action": "ParseCertificate",
-	})
-	l.Debugf("ParseCertificate")
-	if c.Annotations[state.OperatorName+"/acm-role-arn"] != "" {
-		s.RoleArn = c.Annotations[state.OperatorName+"/acm-role-arn"]
-	}
-	if c.Annotations[state.OperatorName+"/acm-region"] != "" {
-		s.Region = c.Annotations[state.OperatorName+"/acm-region"]
-	}
-	if c.Annotations[state.OperatorName+"/acm-certificate-arn"] != "" {
-		s.CertificateArn = c.Annotations[state.OperatorName+"/acm-certificate-arn"]
-	}
-	if c.Annotations[state.OperatorName+"/acm-secret-name"] != "" {
-		s.SecretName = c.Annotations[state.OperatorName+"/acm-secret-name"]
-	}
-	// if secret name is in the format of "namespace/secretname" then parse it
-	if strings.Contains(s.SecretName, "/") {
-		s.SecretNamespace = strings.Split(s.SecretName, "/")[0]
-		s.SecretName = strings.Split(s.SecretName, "/")[1]
-	}
-	return nil
-}
-
 // separateCertsACM wraps separateCerts and returns an acm ImportCertificateInput Object
 func separateCertsACM(ca, crt, key []byte) *acm.ImportCertificateInput {
 	re := regexp.MustCompile(`(?s)(-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----)`)
@@ -204,50 +178,60 @@ func (s *ACMStore) certToACMInput(c *tlssecret.Certificate) (*acm.ImportCertific
 	return im, nil
 }
 
-func (s *ACMStore) Update(secret *corev1.Secret) error {
+func (s *ACMStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error {
 	l := log.WithFields(log.Fields{
-		"action":          "Update",
-		"store":           "acm",
-		"secretName":      secret.ObjectMeta.Name,
-		"secretNamespace": secret.ObjectMeta.Namespace,
+		"action": "FromConfig",
 	})
-	l.Debugf("Update")
-	c := tlssecret.ParseSecret(secret)
-	if err := s.ParseCertificate(c); err != nil {
-		l.WithError(err).Errorf("acm.ParseCertificate error")
-		return err
+	l.Debugf("FromConfig")
+	if c.Config["role-arn"] != "" {
+		s.RoleArn = c.Config["role-arn"]
 	}
+	if c.Config["region"] != "" {
+		s.Region = c.Config["region"]
+	}
+	if c.Config["certificate-arn"] != "" {
+		s.CertificateArn = c.Config["certificate-arn"]
+	}
+	if c.Config["secret-name"] != "" {
+		s.SecretName = c.Config["secret-name"]
+	}
+	if c.Config["secret-namespace"] != "" {
+		s.SecretNamespace = c.Config["secret-namespace"]
+	}
+	if strings.Contains(s.SecretName, "/") {
+		s.SecretNamespace = strings.Split(s.SecretName, "/")[0]
+		s.SecretName = strings.Split(s.SecretName, "/")[1]
+	}
+	return nil
+}
+
+func (s *ACMStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
+	s.SecretNamespace = c.Namespace
+	l := log.WithFields(log.Fields{
+		"action":     "Sync",
+		"secretName": c.SecretName,
+	})
+	l.Debugf("Sync")
 	origArn := s.CertificateArn
 	im, err := s.certToACMInput(c)
 	if err != nil {
 		l.WithError(err).Errorf("certToACMInput error")
-		return err
+		return nil, err
 	}
 	cerr := s.replicateACMCert(im)
 	if cerr != nil {
 		l.WithError(cerr).Errorf("replicateACMCert error")
-		return cerr
+		return nil, cerr
 	}
 	l = l.WithFields(log.Fields{
 		"id": s.CertificateArn,
 	})
+	var keyUpdates map[string]string
 	if origArn != s.CertificateArn {
-		// update the secret to reflect the new arn
-		secret.Annotations[state.OperatorName+"/acm-certificate-arn"] = s.CertificateArn
-		sc := state.KubeClient.CoreV1().Secrets(secret.ObjectMeta.Namespace)
-		uo := metav1.UpdateOptions{
-			FieldManager: state.OperatorName,
-		}
-		_, uerr := sc.Update(
-			context.Background(),
-			secret,
-			uo,
-		)
-		if uerr != nil {
-			l.WithError(uerr).Errorf("sync error")
-			return uerr
+		keyUpdates = map[string]string{
+			"certificate-arn": s.CertificateArn,
 		}
 	}
 	l.Info("certificate synced")
-	return nil
+	return keyUpdates, nil
 }

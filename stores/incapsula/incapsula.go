@@ -14,7 +14,6 @@ import (
 	"github.com/robertlestak/cert-manager-sync/pkg/state"
 	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
 	log "github.com/sirupsen/logrus"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -41,19 +40,19 @@ func (s *IncapsulaStore) GetApiKey(ctx context.Context) error {
 	return nil
 }
 
-func (s *IncapsulaStore) ParseCertificate(c *tlssecret.Certificate) error {
+func (s *IncapsulaStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error {
 	l := log.WithFields(log.Fields{
-		"action": "ParseCertificate",
+		"action": "FromConfig",
 	})
-	l.Debugf("ParseCertificate")
-	if c.Annotations[state.OperatorName+"/incapsula-site-id"] != "" {
-		s.SiteID = c.Annotations[state.OperatorName+"/incapsula-site-id"]
+	l.Debugf("FromConfig")
+	if c.Config["site-id"] != "" {
+		s.SiteID = c.Config["site-id"]
 	}
-	if c.Annotations[state.OperatorName+"/incapsula-secret-name"] != "" {
-		s.SecretName = c.Annotations[state.OperatorName+"/incapsula-secret-name"]
+	if c.Config["secret-name"] != "" {
+		s.SecretName = c.Config["secret-name"]
 	}
-	if c.Annotations[state.OperatorName+"/incapsula-auth-type"] != "" {
-		s.AuthType = c.Annotations[state.OperatorName+"/incapsula-auth-type"]
+	if c.Config["auth-type"] != "" {
+		s.AuthType = c.Config["auth-type"]
 	} else {
 		s.AuthType = "RSA"
 	}
@@ -191,22 +190,16 @@ func (s *IncapsulaStore) GetIncapsulaSiteStatus() (string, error) {
 	return string(bd), err
 }
 
-func (s *IncapsulaStore) Update(secret *corev1.Secret) error {
+func (s *IncapsulaStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
+	s.SecretNamespace = c.Namespace
 	l := log.WithFields(log.Fields{
-		"action":          "Update",
+		"action":          "Sync",
 		"store":           "incapsula",
-		"secretName":      secret.ObjectMeta.Name,
-		"secretNamespace": secret.ObjectMeta.Namespace,
+		"secretName":      s.SecretName,
+		"secretNamespace": s.SecretNamespace,
+		"siteID":          s.SiteID,
 	})
 	l.Debugf("Update")
-	c := tlssecret.ParseSecret(secret)
-	if err := s.ParseCertificate(c); err != nil {
-		l.WithError(err).Errorf("incapsula.ParseCertificate error")
-		return err
-	}
-	if s.SecretNamespace == "" {
-		s.SecretNamespace = secret.Namespace
-	}
 	l = l.WithFields(log.Fields{
 		"id": s.SiteID,
 	})
@@ -214,19 +207,19 @@ func (s *IncapsulaStore) Update(secret *corev1.Secret) error {
 	if err := s.GetApiKey(ctx); err != nil {
 		l.WithError(err).Errorf("incapsula.GetApiKey error")
 		l.WithError(err).Errorf("sync error")
-		return err
+		return nil, err
 	}
-	_, err := s.GetIncapsulaSiteStatus()
+	bd, err := s.GetIncapsulaSiteStatus()
 	if err != nil {
-		l.WithError(err).Errorf("incapsula.GetIncapsulaSiteStatus error")
+		l.WithError(err).Errorf("incapsula.GetIncapsulaSiteStatus error: %s", bd)
 		l.WithError(err).Errorf("sync error")
-		return err
+		return nil, err
 	}
 	if err := s.UploadIncapsulaCert(c); err != nil {
 		l.WithError(err).Errorf("incapsula.UploadIncapsulaCert error")
 		l.WithError(err).Errorf("sync error")
-		return err
+		return nil, err
 	}
 	l.Info("certificate synced")
-	return nil
+	return nil, nil
 }

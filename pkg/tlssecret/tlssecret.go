@@ -7,19 +7,21 @@ import (
 type Certificate struct {
 	SecretName  string
 	Namespace   string
-	Annotations map[string]string
-	Labels      map[string]string
+	Syncs       []*GenericSecretSyncConfig
 	Ca          []byte
 	Certificate []byte
 	Key         []byte
 }
 
 func ParseSecret(s *corev1.Secret) *Certificate {
+	syncs, err := SyncsForSecret(s)
+	if err != nil {
+		return nil
+	}
 	c := &Certificate{
 		SecretName:  s.ObjectMeta.Name,
 		Namespace:   s.ObjectMeta.Namespace,
-		Annotations: s.ObjectMeta.Annotations,
-		Labels:      s.ObjectMeta.Labels,
+		Syncs:       syncs,
 		Ca:          s.Data["ca.crt"],
 		Certificate: s.Data["tls.crt"],
 		Key:         s.Data["tls.key"],

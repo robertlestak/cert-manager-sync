@@ -14,7 +14,6 @@ import (
 	"github.com/robertlestak/cert-manager-sync/pkg/state"
 	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
 	log "github.com/sirupsen/logrus"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -268,16 +267,16 @@ func (s *ThreatXStore) UpdateSite(ctx context.Context, tx ThreatXSite) error {
 	return nil
 }
 
-func (s *ThreatXStore) ParseCertificate(c *tlssecret.Certificate) error {
+func (s *ThreatXStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error {
 	l := log.WithFields(log.Fields{
-		"func": "ThreatXStore.ParseCertificate",
+		"func": "ThreatXStore.FromConfig",
 	})
 	l.Debug("start")
-	if c.Annotations[state.OperatorName+"/threatx-secret-name"] != "" {
-		s.SecretName = c.Annotations[state.OperatorName+"/threatx-secret-name"]
+	if c.Config["secret-name"] != "" {
+		s.SecretName = c.Config["secret-name"]
 	}
-	if c.Annotations[state.OperatorName+"/threatx-hostname"] != "" {
-		s.Hostname = c.Annotations[state.OperatorName+"/threatx-hostname"]
+	if c.Config["hostname"] != "" {
+		s.Hostname = c.Config["hostname"]
 	}
 	if strings.Contains(s.SecretName, "/") {
 		s.SecretNamespace = strings.Split(s.SecretName, "/")[0]
@@ -286,42 +285,38 @@ func (s *ThreatXStore) ParseCertificate(c *tlssecret.Certificate) error {
 	return nil
 }
 
-func (s *ThreatXStore) Update(secret *corev1.Secret) error {
+func (s *ThreatXStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
+	s.SecretNamespace = c.Namespace
 	l := log.WithFields(log.Fields{
-		"action":          "Update",
+		"action":          "Sync",
 		"store":           "threatx",
-		"secretName":      secret.ObjectMeta.Name,
-		"secretNamespace": secret.ObjectMeta.Namespace,
+		"secretName":      s.SecretName,
+		"secretNamespace": s.SecretNamespace,
 	})
 	l.Debug("start")
-	cert := tlssecret.ParseSecret(secret)
-	if err := s.ParseCertificate(cert); err != nil {
-		l.Error(err)
-		return err
-	}
 	l = l.WithFields(log.Fields{
 		"id": s.Hostname,
 	})
 	ctx := context.Background()
 	if err := s.GetAPIKey(ctx); err != nil {
 		l.Error(err)
-		return err
+		return nil, err
 	}
 	if err := s.ThreatxLogin(ctx); err != nil {
 		l.Error(err)
-		return err
+		return nil, err
 	}
 	site, err := s.GetSite(ctx)
 	if err != nil {
 		l.Error(err)
-		return err
+		return nil, err
 	}
-	site.SslBlob = string(cert.FullChain()) + string(cert.Key)
+	site.SslBlob = string(c.FullChain()) + string(c.Key)
 	site.SslEnabled = true
 	if err := s.UpdateSite(ctx, site); err != nil {
 		l.WithError(err).Error("sync error")
-		return err
+		return nil, err
 	}
 	l.Info("certificate synced")
-	return nil
+	return nil, nil
 }

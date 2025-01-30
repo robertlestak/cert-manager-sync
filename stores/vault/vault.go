@@ -8,10 +8,8 @@ import (
 	"strings"
 
 	"github.com/hashicorp/vault/api"
-	"github.com/robertlestak/cert-manager-sync/pkg/state"
 	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
 	log "github.com/sirupsen/logrus"
-	corev1 "k8s.io/api/core/v1"
 )
 
 type VaultStore struct {
@@ -158,27 +156,27 @@ func (s *VaultStore) WriteSecret(sec map[string]interface{}) (map[string]interfa
 	return secrets, nil
 }
 
-func (s *VaultStore) ParseCertificate(c *tlssecret.Certificate) error {
+func (s *VaultStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error {
 	l := log.WithFields(log.Fields{
-		"action": "ParseCertificate",
+		"action": "FromConfig",
 	})
-	l.Debugf("ParseCertificate")
-	if c.Annotations[state.OperatorName+"/vault-path"] != "" {
-		s.Path = c.Annotations[state.OperatorName+"/vault-path"]
+	l.Debugf("FromConfig")
+	if c.Config["path"] != "" {
+		s.Path = c.Config["path"]
 	}
-	if c.Annotations[state.OperatorName+"/vault-addr"] != "" {
-		s.Addr = c.Annotations[state.OperatorName+"/vault-addr"]
+	if c.Config["addr"] != "" {
+		s.Addr = c.Config["addr"]
 	}
-	if c.Annotations[state.OperatorName+"/vault-namespace"] != "" {
-		s.Namespace = c.Annotations[state.OperatorName+"/vault-namespace"]
+	if c.Config["namespace"] != "" {
+		s.Namespace = c.Config["namespace"]
 	}
-	if c.Annotations[state.OperatorName+"/vault-role"] != "" {
-		s.Role = c.Annotations[state.OperatorName+"/vault-role"]
+	if c.Config["role"] != "" {
+		s.Role = c.Config["role"]
 	}
-	if c.Annotations[state.OperatorName+"/vault-auth-method"] != "" {
-		s.AuthMethod = c.Annotations[state.OperatorName+"/vault-auth-method"]
+	if c.Config["auth-method"] != "" {
+		s.AuthMethod = c.Config["auth-method"]
 	}
-	if c.Annotations[state.OperatorName+"/vault-base64-decode"] == "true" || c.Annotations[state.OperatorName+"/vault-b64dec"] == "true" {
+	if c.Config["base64-decode"] == "true" || c.Config["b64dec"] == "true" {
 		s.Base64Decode = true
 	}
 	return nil
@@ -191,19 +189,14 @@ func writeSecretValue(value []byte, asString bool) any {
 	return value
 }
 
-func (s *VaultStore) Update(secret *corev1.Secret) error {
+func (s *VaultStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
 	l := log.WithFields(log.Fields{
 		"action":          "Update",
 		"store":           "vault",
-		"secretName":      secret.ObjectMeta.Name,
-		"secretNamespace": secret.ObjectMeta.Namespace,
+		"secretName":      c.SecretName,
+		"secretNamespace": c.Namespace,
 	})
 	l.Debugf("Update")
-	c := tlssecret.ParseSecret(secret)
-	if err := s.ParseCertificate(c); err != nil {
-		l.WithError(err).Errorf("vault.ParseCertificate error")
-		return err
-	}
 	var vid string
 	if s.Namespace != "" {
 		vid = fmt.Sprintf("%s %s/%s", s.Addr, s.Namespace, s.Path)
@@ -221,12 +214,12 @@ func (s *VaultStore) Update(secret *corev1.Secret) error {
 	_, cerr := s.NewClient()
 	if cerr != nil {
 		l.WithError(cerr).Errorf("vault.NewClient error")
-		return cerr
+		return nil, cerr
 	}
 	_, err := s.NewToken()
 	if err != nil {
 		l.WithError(err).Errorf("vault.NewToken error")
-		return err
+		return nil, err
 	}
 	cd := map[string]interface{}{
 		"tls.crt": writeSecretValue(c.Certificate, s.Base64Decode),
@@ -240,8 +233,8 @@ func (s *VaultStore) Update(secret *corev1.Secret) error {
 	_, err = s.WriteSecret(cd)
 	if err != nil {
 		l.WithError(err).Errorf("sync error")
-		return err
+		return nil, err
 	}
 	l.Info("certificate synced")
-	return nil
+	return nil, nil
 }

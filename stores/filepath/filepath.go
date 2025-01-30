@@ -6,10 +6,8 @@ import (
 
 	fp "path/filepath"
 
-	"github.com/robertlestak/cert-manager-sync/pkg/state"
 	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
 	log "github.com/sirupsen/logrus"
-	corev1 "k8s.io/api/core/v1"
 )
 
 type FilepathStore struct {
@@ -19,47 +17,42 @@ type FilepathStore struct {
 	KeyFile   string
 }
 
-func (s *FilepathStore) ParseCertificate(c *tlssecret.Certificate) error {
+func (s *FilepathStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error {
 	l := log.WithFields(log.Fields{
-		"action": "ParseCertificate",
+		"action": "FromConfig",
 	})
-	l.Debugf("ParseCertificate")
-	if c.Annotations[state.OperatorName+"/filepath-dir"] != "" {
-		s.Directory = c.Annotations[state.OperatorName+"/filepath-dir"]
+	l.Debugf("FromConfig")
+	if c.Config["dir"] != "" {
+		s.Directory = c.Config["dir"]
 	}
-	if c.Annotations[state.OperatorName+"/filepath-cert"] != "" {
-		s.CertFile = c.Annotations[state.OperatorName+"/filepath-cert"]
+	if c.Config["cert"] != "" {
+		s.CertFile = c.Config["cert"]
 	} else {
 		s.CertFile = "tls.crt"
 	}
-	if c.Annotations[state.OperatorName+"/filepath-key"] != "" {
-		s.KeyFile = c.Annotations[state.OperatorName+"/filepath-key"]
+	if c.Config["key"] != "" {
+		s.KeyFile = c.Config["key"]
 	} else {
 		s.KeyFile = "tls.key"
 	}
-	if c.Annotations[state.OperatorName+"/filepath-ca"] != "" {
-		s.CAFile = c.Annotations[state.OperatorName+"/filepath-ca"]
+	if c.Config["ca"] != "" {
+		s.CAFile = c.Config["ca"]
 	} else {
 		s.CAFile = "ca.crt"
 	}
 	return nil
 }
 
-func (s *FilepathStore) Update(secret *corev1.Secret) error {
+func (s *FilepathStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
 	l := log.WithFields(log.Fields{
-		"action":          "Update",
+		"action":          "Sync",
 		"store":           "filepath",
-		"secretName":      secret.ObjectMeta.Name,
-		"secretNamespace": secret.ObjectMeta.Namespace,
+		"secretName":      c.SecretName,
+		"secretNamespace": c.Namespace,
 	})
 	l.Debugf("Update")
-	c := tlssecret.ParseSecret(secret)
-	if err := s.ParseCertificate(c); err != nil {
-		l.WithError(err).Errorf("ParseCertificate error")
-		return err
-	}
 	if s.Directory == "" {
-		return fmt.Errorf("filepath-dir annotation is required")
+		return nil, fmt.Errorf("filepath-dir annotation is required")
 	}
 	if s.CertFile == "" {
 		s.CertFile = "tls.crt"
@@ -78,18 +71,18 @@ func (s *FilepathStore) Update(secret *corev1.Secret) error {
 	})
 	if err := os.WriteFile(certPath, c.Certificate, 0644); err != nil {
 		l.WithError(err).Errorf("sync error")
-		return err
+		return nil, err
 	}
 	if err := os.WriteFile(keyPath, c.Key, 0644); err != nil {
 		l.WithError(err).Errorf("sync error")
-		return err
+		return nil, err
 	}
 	if len(c.Ca) > 0 {
 		if err := os.WriteFile(caPath, c.Ca, 0644); err != nil {
 			l.WithError(err).Errorf("sync error")
-			return err
+			return nil, err
 		}
 	}
 	l.Info("certificate synced")
-	return nil
+	return nil, nil
 }

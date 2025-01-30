@@ -2,13 +2,15 @@ package certmanagersync
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"time"
 
 	"github.com/robertlestak/cert-manager-sync/internal/metrics"
+	cmtypes "github.com/robertlestak/cert-manager-sync/internal/types"
 	"github.com/robertlestak/cert-manager-sync/pkg/state"
+	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
 	"github.com/robertlestak/cert-manager-sync/stores/acm"
 	"github.com/robertlestak/cert-manager-sync/stores/cloudflare"
 	"github.com/robertlestak/cert-manager-sync/stores/digitalocean"
@@ -21,57 +23,41 @@ import (
 	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-)
-
-var (
-	ErrInvalidStoreType = errors.New("invalid store type")
-)
-
-type StoreType string
-
-const (
-	ACMStoreType          StoreType = "acm"
-	CloudflareStoreType   StoreType = "cloudflare"
-	DigitalOceanStoreType StoreType = "digitalocean"
-	FilepathStoreType     StoreType = "filepath"
-	GCPStoreType          StoreType = "gcp"
-	HerokuStoreType       StoreType = "heroku"
-	IncapsulaStoreType    StoreType = "incapsula"
-	ThreatxStoreType      StoreType = "threatx"
-	VaultStoreType        StoreType = "vault"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 type RemoteStore interface {
-	Update(secret *corev1.Secret) error
+	Sync(cert *tlssecret.Certificate) (map[string]string, error)
+	FromConfig(config tlssecret.GenericSecretSyncConfig) error
 }
 
-func NewStore(storeType StoreType) (RemoteStore, error) {
+func NewStore(storeType cmtypes.StoreType) (RemoteStore, error) {
 	l := log.WithFields(log.Fields{
 		"action": "NewStore",
 	})
 	l.Debugf("NewStore %s", storeType)
 	var store RemoteStore
 	switch storeType {
-	case ACMStoreType:
+	case cmtypes.ACMStoreType:
 		store = &acm.ACMStore{}
-	case CloudflareStoreType:
+	case cmtypes.CloudflareStoreType:
 		store = &cloudflare.CloudflareStore{}
-	case DigitalOceanStoreType:
+	case cmtypes.DigitalOceanStoreType:
 		store = &digitalocean.DigitalOceanStore{}
-	case FilepathStoreType:
+	case cmtypes.FilepathStoreType:
 		store = &filepath.FilepathStore{}
-	case GCPStoreType:
+	case cmtypes.GCPStoreType:
 		store = &gcpcm.GCPStore{}
-	case HerokuStoreType:
+	case cmtypes.HerokuStoreType:
 		store = &heroku.HerokuStore{}
-	case IncapsulaStoreType:
+	case cmtypes.IncapsulaStoreType:
 		store = &incapsula.IncapsulaStore{}
-	case ThreatxStoreType:
+	case cmtypes.ThreatxStoreType:
 		store = &threatx.ThreatXStore{}
-	case VaultStoreType:
+	case cmtypes.VaultStoreType:
 		store = &vault.VaultStore{}
 	default:
-		return nil, ErrInvalidStoreType
+		return nil, cmtypes.ErrInvalidStoreType
 	}
 	return store, nil
 }
@@ -84,6 +70,9 @@ func maxRetries(s *corev1.Secret) int {
 		"action": "maxRetries",
 	})
 	l.Debugf("maxRetries %s", s.Name)
+	if s.Annotations == nil {
+		return -1
+	}
 	if s.Annotations[state.OperatorName+"/max-sync-attempts"] != "" {
 		iv, err := strconv.ParseInt(s.Annotations[state.OperatorName+"/max-sync-attempts"], 10, 64)
 		if err != nil {
@@ -103,6 +92,9 @@ func consumedRetries(s *corev1.Secret) int {
 		"action": "consumedRetries",
 	})
 	l.Debugf("consumedRetries %s", s.Name)
+	if s.Annotations == nil {
+		return 0
+	}
 	if s.Annotations[state.OperatorName+"/failed-sync-attempts"] != "" {
 		iv, err := strconv.ParseInt(s.Annotations[state.OperatorName+"/failed-sync-attempts"], 10, 64)
 		if err != nil {
@@ -123,6 +115,9 @@ func nextRetryTime(s *corev1.Secret) time.Time {
 		"name":      s.Name,
 	})
 	l.Debug("nextRetryTime")
+	if s.Annotations == nil {
+		return time.Time{}
+	}
 	if s.Annotations[state.OperatorName+"/next-retry"] != "" {
 		t, err := time.Parse(time.RFC3339, s.Annotations[state.OperatorName+"/next-retry"])
 		if err != nil {
@@ -182,160 +177,6 @@ func calculateNextRetryTime(secret *corev1.Secret) time.Time {
 	return nextRetryTime
 }
 
-func incrementRetries(secretNamespace, secretName string) error {
-	l := log.WithFields(log.Fields{
-		"action": "incrementRetries",
-		"secret": fmt.Sprintf("%s/%s", secretNamespace, secretName),
-	})
-	l.Debugf("incrementRetries %s/%s", secretNamespace, secretName)
-	// get the secret from k8s, since we don't know if data has been changed by a store
-	gopt := metav1.GetOptions{}
-	secret, err := state.KubeClient.CoreV1().Secrets(secretNamespace).Get(context.Background(), secretName, gopt)
-	if err != nil {
-		l.WithError(err).Errorf("Get error")
-		return err
-	}
-	if secret.Annotations == nil {
-		secret.Annotations = make(map[string]string)
-	}
-	// increment the failed-sync-attempts annotation
-	iv := consumedRetries(secret) + 1
-	secret.Annotations[state.OperatorName+"/failed-sync-attempts"] = strconv.Itoa(iv)
-	// set the next-retry annotation to the current time plus the delay
-	// the delay is a binary exponential backoff, starting at 1 minute, then 2, 4, 8.. up to 32 hours
-	nextRetry := calculateNextRetryTime(secret)
-	l = l.WithFields(log.Fields{
-		"failed-sync-attempts": iv,
-		"next-retry":           nextRetry,
-	})
-	// add the next-retry annotation to the secret
-	// this will be evaluated by the readyToRetry function
-	// when the next sync attempt is made
-	uo := metav1.UpdateOptions{
-		FieldManager: state.OperatorName,
-	}
-	secret.Annotations[state.OperatorName+"/next-retry"] = nextRetry.Format(time.RFC3339)
-	_, err = state.KubeClient.CoreV1().Secrets(secretNamespace).Update(context.Background(), secret, uo)
-	if err != nil {
-		l.WithError(err).Errorf("Update secret error")
-		return err
-	}
-	l.Debugf("incremented retries")
-	return nil
-}
-
-func resetRetries(secretNamespace, secretName string) error {
-	l := log.WithFields(log.Fields{
-		"action": "resetRetries",
-		"secret": fmt.Sprintf("%s/%s", secretNamespace, secretName),
-	})
-	l.Debugf("resetRetries %s/%s", secretNamespace, secretName)
-	// get the secret from k8s, since we don't know if data has been changed by a store
-	gopt := metav1.GetOptions{}
-	secret, err := state.KubeClient.CoreV1().Secrets(secretNamespace).Get(context.Background(), secretName, gopt)
-	if err != nil {
-		l.WithError(err).Errorf("Get error")
-		return err
-	}
-	// remove the failed-sync-attempts annotation
-	delete(secret.Annotations, state.OperatorName+"/failed-sync-attempts")
-	// remove the next-retry annotation
-	delete(secret.Annotations, state.OperatorName+"/next-retry")
-	uo := metav1.UpdateOptions{
-		FieldManager: state.OperatorName,
-	}
-	_, err = state.KubeClient.CoreV1().Secrets(secretNamespace).Update(context.Background(), secret, uo)
-	if err != nil {
-		l.WithError(err).Errorf("Update secret error")
-		return err
-	}
-	return nil
-}
-
-func EnabledStores(s *corev1.Secret) []StoreType {
-	l := log.WithFields(log.Fields{
-		"action": "EnabledStores",
-	})
-	l.Debugf("checking EnabledStores %s", s.Name)
-	var stores []StoreType
-	if s.Annotations[state.OperatorName+"/sync-enabled"] != "true" {
-		l.Trace("sync not sync-enabled")
-		return nil
-	}
-	// if there is a acm-enabled = true annotation, add acm to the list of stores
-	if s.Annotations[state.OperatorName+"/acm-enabled"] == "true" {
-		l.Debug("sync-enabled acm")
-		stores = append(stores, ACMStoreType)
-	}
-	// if there is a cloudflare-enabled = true annotation, add cloudflare to the list of stores
-	if s.Annotations[state.OperatorName+"/cloudflare-enabled"] == "true" {
-		l.Debug("sync-enabled cloudflare")
-		stores = append(stores, CloudflareStoreType)
-	}
-	// if there is a digitalocean-enabled = true annotation, add digitalocean to the list of stores
-	if s.Annotations[state.OperatorName+"/digitalocean-enabled"] == "true" {
-		l.Debug("sync-enabled digitalocean")
-		stores = append(stores, DigitalOceanStoreType)
-	}
-	// if there is a filepath-enabled = true annotation, add filepath to the list of stores
-	if s.Annotations[state.OperatorName+"/filepath-enabled"] == "true" {
-		l.Debug("sync-enabled filepath")
-		stores = append(stores, FilepathStoreType)
-	}
-	// if there is a gcp-enabled = true annotation, add gcp to the list of stores
-	if s.Annotations[state.OperatorName+"/gcp-enabled"] == "true" {
-		l.Debug("sync-enabled gcp")
-		stores = append(stores, GCPStoreType)
-	}
-	// if there is a heroku-enabled = true annotation, add heroku to the list of stores
-	if s.Annotations[state.OperatorName+"/heroku-enabled"] == "true" {
-		l.Debug("sync-enabled heroku")
-		stores = append(stores, HerokuStoreType)
-	}
-	// if there is a incapsula-site-id annotation, add incapsula to the list of stores
-	if s.Annotations[state.OperatorName+"/incapsula-site-id"] != "" {
-		l.Debug("sync-enabled incapsula")
-		stores = append(stores, IncapsulaStoreType)
-	}
-	// if there is a threatx-hostname annotation, add threatx to the list of stores
-	if s.Annotations[state.OperatorName+"/threatx-hostname"] != "" {
-		l.Debug("sync-enabled threatx")
-		stores = append(stores, ThreatxStoreType)
-	}
-	// if there is a vault-addr annotation, add vault to the list of stores
-	if s.Annotations[state.OperatorName+"/vault-addr"] != "" {
-		l.Debug("sync-enabled vault")
-		stores = append(stores, VaultStoreType)
-	}
-	return stores
-}
-
-func SyncSecretToStore(secret *corev1.Secret, store StoreType) error {
-	l := log.WithFields(log.Fields{
-		"action":    "SyncSecretToStore",
-		"store":     store,
-		"namespace": secret.Namespace,
-		"secret":    secret.Name,
-	})
-	l.Debugf("syncing store %s", store)
-	rs, err := NewStore(store)
-	if err != nil {
-		l.WithError(err).Error("NewStore error")
-		metrics.SetFailure(secret.Namespace, secret.Name, string(store))
-		state.EventRecorder.Event(secret, corev1.EventTypeWarning, "SyncFailed", fmt.Sprintf("Secret sync failed to store %s", store))
-		return fmt.Errorf("error creating store %s: %v", store, err)
-	}
-	if err := rs.Update(secret); err != nil {
-		l.WithError(err).Error("sync error")
-		metrics.SetFailure(secret.Namespace, secret.Name, string(store))
-		state.EventRecorder.Event(secret, corev1.EventTypeWarning, "SyncFailed", fmt.Sprintf("Secret sync failed to store %s", store))
-		return fmt.Errorf("error syncing secret %s/%s to store %s: %v", secret.Namespace, secret.Name, store, err)
-	}
-	metrics.SetSuccess(secret.Namespace, secret.Name, string(store))
-	state.EventRecorder.Event(secret, corev1.EventTypeNormal, "Synced", fmt.Sprintf("Secret synced to %s", store))
-	return nil
-}
-
 func HandleSecret(s *corev1.Secret) error {
 	l := log.WithFields(log.Fields{
 		"action":    "HandleSecret",
@@ -348,52 +189,109 @@ func HandleSecret(s *corev1.Secret) error {
 		l.Debug("not ready to retry")
 		return nil
 	}
-	// get the list of stores enabled for this secret
-	stores := EnabledStores(s)
-	if len(stores) == 0 {
-		l.Debug("no stores enabled")
-		return nil
-	}
 	// check if the secret has changed since last sync
 	if !state.CacheChanged(s) {
 		l.Debug("cache not changed")
 		return nil
 	}
-	// sync the secret to each enabled store in parallel
-	errors := make(chan error, len(stores))
-	for _, store := range stores {
-		go func(store StoreType) {
-			errors <- SyncSecretToStore(s, store)
-		}(store)
+	cert := tlssecret.ParseSecret(s)
+	if cert == nil {
+		l.Errorf("error parsing secret")
+		return fmt.Errorf("error parsing secret %s/%s", s.Namespace, s.Name)
 	}
-	// wait for all stores to finish syncing
-	// if a store returns an error, return the error
-	// but only after all stores have finished syncing
 	var errs []error
-	for i := 0; i < len(stores); i++ {
-		err := <-errors
+	for _, sync := range cert.Syncs {
+		ll := l.WithFields(log.Fields{
+			"store": sync.Store,
+		})
+		ll.Debugf("syncing to store %s", sync.Store)
+		rs, err := NewStore(cmtypes.StoreType(sync.Store))
 		if err != nil {
-			l.WithError(err).Errorf("SyncCertToStore error")
+			l.WithError(err).Errorf("NewStore error")
+			metrics.SetFailure(s.Namespace, s.Name, sync.Store)
+			state.EventRecorder.Event(s, corev1.EventTypeWarning, "SyncFailed", fmt.Sprintf("Secret sync failed to store %s", sync.Store))
 			errs = append(errs, err)
+			continue
 		}
+		if err := rs.FromConfig(*sync); err != nil {
+			l.WithError(err).Errorf("FromConfig error")
+			metrics.SetFailure(s.Namespace, s.Name, sync.Store)
+			state.EventRecorder.Event(s, corev1.EventTypeWarning, "SyncFailed", fmt.Sprintf("Secret sync failed to store %s", sync.Store))
+			errs = append(errs, err)
+			continue
+		}
+		updates, err := rs.Sync(cert)
+		if err != nil {
+			l.WithError(err).Errorf("Sync error")
+			metrics.SetFailure(s.Namespace, s.Name, sync.Store)
+			state.EventRecorder.Event(s, corev1.EventTypeWarning, "SyncFailed", fmt.Sprintf("Secret sync failed to store %s", sync.Store))
+			errs = append(errs, err)
+			continue
+		}
+		if len(updates) > 0 {
+			l.WithField("updates", updates).Debug("synced with updates")
+		}
+		sync.Updates = updates
+	}
+	patchAnnotations := make(map[string]string)
+	if s.Annotations != nil {
+		for k, v := range s.Annotations {
+			patchAnnotations[k] = v
+		}
+	}
+	au := tlssecret.AnnotationUpdates(cert)
+	// add au to patchAnnotations
+	for k, v := range au {
+		patchAnnotations[k] = v
 	}
 	if len(errs) > 0 {
 		// increment the failed-sync-attempts annotation
-		if err := incrementRetries(s.Namespace, s.Name); err != nil {
-			l.WithError(err).Errorf("incrementRetries error")
-		}
-		state.EventRecorder.Event(s, corev1.EventTypeWarning, "SyncFailed", "Secret sync failed")
-		return fmt.Errorf("errors syncing secret %s/%s: %v", s.Namespace, s.Name, errs)
+		// increment the failed-sync-attempts annotation
+		iv := consumedRetries(s) + 1
+		patchAnnotations[state.OperatorName+"/failed-sync-attempts"] = strconv.Itoa(iv)
+		// set the next-retry annotation to the current time plus the delay
+		// the delay is a binary exponential backoff, starting at 1 minute, then 2, 4, 8.. up to 32 hours
+		nextRetry := calculateNextRetryTime(s)
+		// add the next-retry annotation to the secret
+		// this will be evaluated by the readyToRetry function
+		// when the next sync attempt is made
+		patchAnnotations[state.OperatorName+"/next-retry"] = nextRetry.Format(time.RFC3339)
 	} else {
-		// reset the failed-sync-attempts annotation
-		if err := resetRetries(s.Namespace, s.Name); err != nil {
-			l.WithError(err).Errorf("resetRetries error")
-		}
+		delete(patchAnnotations, state.OperatorName+"/failed-sync-attempts")
+		// remove the next-retry annotation
+		delete(patchAnnotations, state.OperatorName+"/next-retry")
+		// the sync was a success, add the secret to the cache
+		patchAnnotations[state.OperatorName+"/hash"] = state.HashSecret(s)
 	}
-	// if the sync was a success, add the secret to the cache
-	state.Cache(s)
-	eventMsg := fmt.Sprintf("Secret synced to %d store%s", len(stores), func() string {
-		if len(stores) == 1 {
+	l.WithField("patchAnnotations", patchAnnotations).Debug("patchAnnotations")
+	// patch the secret with the updated annotations
+	patchData := map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"annotations": patchAnnotations,
+		},
+	}
+	pd, err := json.Marshal(patchData)
+	if err != nil {
+		l.WithError(err).Errorf("json.Marshal error")
+		return err
+	}
+	l.WithField("patchData", string(pd)).Debug("patchData")
+	_, err = state.KubeClient.CoreV1().Secrets(s.Namespace).Patch(context.Background(), s.Name, types.MergePatchType, pd, metav1.PatchOptions{})
+	if err != nil {
+		l.WithError(err).Errorf("Patch error")
+		return err
+	}
+	if len(errs) > 0 {
+		state.EventRecorder.Event(s, corev1.EventTypeWarning, "SyncFailed", fmt.Sprintf("Secret sync failed to %d store%s", len(errs), func() string {
+			if len(errs) == 1 {
+				return ""
+			}
+			return "s"
+		}()))
+		return fmt.Errorf("errors syncing secret %s/%s: %v", s.Namespace, s.Name, errs)
+	}
+	eventMsg := fmt.Sprintf("Secret synced to %d store%s", len(cert.Syncs), func() string {
+		if len(cert.Syncs) == 1 {
 			return ""
 		}
 		return "s"

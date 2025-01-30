@@ -11,9 +11,6 @@ import (
 	"math/big"
 	"testing"
 	"time"
-
-	"github.com/robertlestak/cert-manager-sync/pkg/state"
-	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
 )
 
 // GenerateKey generates an ECDSA private key.
@@ -137,44 +134,6 @@ func TestSeparateCertsDO(t *testing.T) {
 					t.Errorf("Failed to parse certificate chain: %v", err)
 					return
 				}
-			}
-		})
-	}
-}
-
-func TestParseCertificate(t *testing.T) {
-	tests := []struct {
-		name        string
-		certificate *tlssecret.Certificate
-		want        *DigitalOceanStore
-	}{
-		{
-			name: "Test with valid annotations",
-			certificate: &tlssecret.Certificate{
-				Annotations: map[string]string{
-					state.OperatorName + "/digitalocean-secret-name": "namespace/secret-name",
-					state.OperatorName + "/digitalocean-cert-name":   "test-cert-name",
-					state.OperatorName + "/digitalocean-cert-id":     "test-cert-id",
-				},
-			},
-			want: &DigitalOceanStore{
-				SecretName:      "secret-name",
-				SecretNamespace: "namespace",
-				CertName:        "test-cert-name",
-				CertId:          "test-cert-id",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ds := &DigitalOceanStore{}
-			if err := ds.ParseCertificate(tt.certificate); err != nil {
-				t.Errorf("ParseCertificate() error = %v", err)
-				return
-			}
-			if ds.SecretName != tt.want.SecretName || ds.SecretNamespace != tt.want.SecretNamespace || ds.CertName != tt.want.CertName || ds.CertId != tt.want.CertId {
-				t.Errorf("ParseCertificate() = %v, want %v", ds, tt.want)
 			}
 		})
 	}

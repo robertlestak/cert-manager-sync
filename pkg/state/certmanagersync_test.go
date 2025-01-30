@@ -23,9 +23,9 @@ var mockSecret = &corev1.Secret{
 	},
 }
 
-// TestHashSecret checks if hashSecret function returns a consistent hash value
+// TestHashSecret checks if HashSecret function returns a consistent hash value
 func TestHashSecret(t *testing.T) {
-	hash := hashSecret(mockSecret)
+	hash := HashSecret(mockSecret)
 	assert.NotEmpty(t, hash, "The hash should not be empty")
 }
 
@@ -46,25 +46,25 @@ func TestHashSecretDataAndAnnotationsChange(t *testing.T) {
 	}
 
 	// Generate a hash for the base mock secret
-	baseHash := hashSecret(baseMockSecret)
+	baseHash := HashSecret(baseMockSecret)
 	assert.NotEmpty(t, baseHash, "The base hash should not be empty")
 
 	// Step 2: Modify the secret's data
 	modifiedDataSecret := baseMockSecret.DeepCopy()
 	modifiedDataSecret.Data["data-key"] = []byte("new-data-value")
-	modifiedDataHash := hashSecret(modifiedDataSecret)
+	modifiedDataHash := HashSecret(modifiedDataSecret)
 	assert.NotEqual(t, baseHash, modifiedDataHash, "Hash should change with data modification")
 
 	// Step 3: Reset the secret to its base state and modify the secret's annotations
 	modifiedAnnotationsSecret := baseMockSecret.DeepCopy()
 	modifiedAnnotationsSecret.Annotations["annotation-key"] = "new-annotation-value"
-	modifiedAnnotationsHash := hashSecret(modifiedAnnotationsSecret)
+	modifiedAnnotationsHash := HashSecret(modifiedAnnotationsSecret)
 	assert.Equal(t, baseHash, modifiedAnnotationsHash, "Hash should not change with non-tracked annotation modification")
 
 	// Step 4: Reset the secret to its base state and modify the secret's annotations
 	modifiedAnnotationsSecret = baseMockSecret.DeepCopy()
 	modifiedAnnotationsSecret.Annotations[OperatorName+"/testing"] = "new-annotation-value"
-	modifiedAnnotationsHash = hashSecret(modifiedAnnotationsSecret)
+	modifiedAnnotationsHash = HashSecret(modifiedAnnotationsSecret)
 	assert.NotEqual(t, baseHash, modifiedAnnotationsHash, "Hash should change with tracked annotation modification")
 }
 

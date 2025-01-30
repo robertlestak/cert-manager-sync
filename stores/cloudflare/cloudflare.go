@@ -9,7 +9,6 @@ import (
 	"github.com/robertlestak/cert-manager-sync/pkg/state"
 	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
 	log "github.com/sirupsen/logrus"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -39,19 +38,22 @@ func (s *CloudflareStore) GetApiKey(ctx context.Context) error {
 	return nil
 }
 
-func (s *CloudflareStore) ParseCertificate(c *tlssecret.Certificate) error {
+func (s *CloudflareStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error {
 	l := log.WithFields(log.Fields{
-		"action": "ParseCertificate",
+		"action": "FromConfig",
 	})
-	l.Debugf("ParseCertificate")
-	if c.Annotations[state.OperatorName+"/cloudflare-secret-name"] != "" {
-		s.SecretName = c.Annotations[state.OperatorName+"/cloudflare-secret-name"]
+	l.Debugf("FromConfig")
+	if c.Config["secret-name"] != "" {
+		s.SecretName = c.Config["secret-name"]
 	}
-	if c.Annotations[state.OperatorName+"/cloudflare-zone-id"] != "" {
-		s.ZoneId = c.Annotations[state.OperatorName+"/cloudflare-zone-id"]
+	if c.Config["secret-namespace"] != "" {
+		s.SecretNamespace = c.Config["secret-namespace"]
 	}
-	if c.Annotations[state.OperatorName+"/cloudflare-cert-id"] != "" {
-		s.CertId = c.Annotations[state.OperatorName+"/cloudflare-cert-id"]
+	if c.Config["zone-id"] != "" {
+		s.ZoneId = c.Config["zone-id"]
+	}
+	if c.Config["cert-id"] != "" {
+		s.CertId = c.Config["cert-id"]
 	}
 	// if secret name is in the format of "namespace/secretname" then parse it
 	if strings.Contains(s.SecretName, "/") {
@@ -61,34 +63,27 @@ func (s *CloudflareStore) ParseCertificate(c *tlssecret.Certificate) error {
 	return nil
 }
 
-func (s *CloudflareStore) Update(secret *corev1.Secret) error {
+func (s *CloudflareStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
+	s.SecretNamespace = c.Namespace
 	l := log.WithFields(log.Fields{
-		"action":          "Update",
+		"action":          "Sync",
 		"store":           "cloudflare",
-		"secretName":      secret.ObjectMeta.Name,
-		"secretNamespace": secret.ObjectMeta.Namespace,
+		"secretName":      s.SecretName,
+		"secretNamespace": s.SecretNamespace,
 	})
 	l.Debugf("Update")
-	c := tlssecret.ParseSecret(secret)
-	if err := s.ParseCertificate(c); err != nil {
-		l.WithError(err).Errorf("ParseCertificate error")
-		return err
-	}
-	if s.SecretNamespace == "" {
-		s.SecretNamespace = secret.Namespace
-	}
 	if s.SecretName == "" {
-		return fmt.Errorf("secret name not found in certificate annotations")
+		return nil, fmt.Errorf("secret name not found in certificate annotations")
 	}
 	ctx := context.Background()
 	if err := s.GetApiKey(ctx); err != nil {
 		l.WithError(err).Errorf("GetApiKey error")
-		return err
+		return nil, err
 	}
 	client, err := cloudflare.New(s.ApiKey, s.ApiEmail)
 	if err != nil {
 		l.WithError(err).Errorf("cloudflare.New error")
-		return err
+		return nil, err
 	}
 	certRequest := cloudflare.ZoneCustomSSLOptions{
 		Certificate: string(c.FullChain()),
@@ -100,33 +95,23 @@ func (s *CloudflareStore) Update(secret *corev1.Secret) error {
 		sslCert, err = client.UpdateSSL(context.Background(), s.ZoneId, s.CertId, certRequest)
 		if err != nil {
 			l.WithError(err).Errorf("cloudflare.UpdateZoneCustomSSL error")
-			return err
+			return nil, err
 		}
 	} else {
 		sslCert, err = client.CreateSSL(context.Background(), s.ZoneId, certRequest)
 		if err != nil {
 			l.WithError(err).Errorf("cloudflare.CreateZoneCustomSSL error")
-			return err
+			return nil, err
 		}
 	}
 	s.CertId = sslCert.ID
 	l = l.WithField("id", sslCert.ID)
+	var newKeys map[string]string
 	if origCertId != s.CertId {
-		secret.ObjectMeta.Annotations[state.OperatorName+"/cloudflare-cert-id"] = s.CertId
-		sc := state.KubeClient.CoreV1().Secrets(secret.ObjectMeta.Namespace)
-		uo := metav1.UpdateOptions{
-			FieldManager: state.OperatorName,
-		}
-		_, uerr := sc.Update(
-			context.Background(),
-			secret,
-			uo,
-		)
-		if uerr != nil {
-			l.WithError(uerr).Errorf("sync error")
-			return uerr
+		newKeys = map[string]string{
+			"cert-id": s.CertId,
 		}
 	}
 	l.Info("certificate synced")
-	return nil
+	return newKeys, nil
 }

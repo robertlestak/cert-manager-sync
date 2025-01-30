@@ -12,7 +12,6 @@ import (
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/api/option"
 	"google.golang.org/genproto/protobuf/field_mask"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -41,36 +40,36 @@ func (s *GCPStore) GetApiKey(ctx context.Context) error {
 }
 
 // secretToGCPInput converts a k8s secret to a properly-formatted GCP Import object
-func (s *GCPStore) secretToGCPCert(secret *corev1.Secret) *certificatemanagerpb.Certificate {
-	fullChain := tlssecret.ParseSecret(secret).FullChain()
+func (s *GCPStore) certToGCPCert(c *tlssecret.Certificate) *certificatemanagerpb.Certificate {
+	fullChain := c.FullChain()
 	sm_cert := &certificatemanagerpb.Certificate_SelfManagedCertificate{
 		PemCertificate: string(fullChain),
-		PemPrivateKey:  string(secret.Data["tls.key"]),
+		PemPrivateKey:  string(c.Key),
 	}
 	if s.CertificateName == "" {
-		s.CertificateName = "projects/" + s.ProjectID + "/locations/" + s.Location + "/certificates/" + secret.ObjectMeta.Namespace + "-" + secret.ObjectMeta.Name
+		s.CertificateName = "projects/" + s.ProjectID + "/locations/" + s.Location + "/certificates/" + c.Namespace + "-" + c.SecretName
 	}
 	return &certificatemanagerpb.Certificate{
 		Name: s.CertificateName,
 		Type: &certificatemanagerpb.Certificate_SelfManaged{SelfManaged: sm_cert}}
 }
 
-func (s *GCPStore) ParseCertificate(c *tlssecret.Certificate) error {
+func (s *GCPStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error {
 	l := log.WithFields(log.Fields{
-		"action": "ParseCertificate",
+		"action": "FromConfig",
 	})
-	l.Debugf("ParseCertificate")
-	if c.Annotations[state.OperatorName+"/gcp-project"] != "" {
-		s.ProjectID = c.Annotations[state.OperatorName+"/gcp-project"]
+	l.Debugf("FromConfig")
+	if c.Config["project"] != "" {
+		s.ProjectID = c.Config["project"]
 	}
-	if c.Annotations[state.OperatorName+"/gcp-location"] != "" {
-		s.Location = c.Annotations[state.OperatorName+"/gcp-location"]
+	if c.Config["location"] != "" {
+		s.Location = c.Config["location"]
 	}
-	if c.Annotations[state.OperatorName+"/gcp-certificate-name"] != "" {
-		s.CertificateName = c.Annotations[state.OperatorName+"/gcp-certificate-name"]
+	if c.Config["certificate-name"] != "" {
+		s.CertificateName = c.Config["certificate-name"]
 	}
-	if c.Annotations[state.OperatorName+"/gcp-secret-name"] != "" {
-		s.SecretName = c.Annotations[state.OperatorName+"/gcp-secret-name"]
+	if c.Config["secret-name"] != "" {
+		s.SecretName = c.Config["secret-name"]
 	}
 	// if secret name is in the format of "namespace/secretname" then parse it
 	if strings.Contains(s.SecretName, "/") {
@@ -134,26 +133,22 @@ func (s *GCPStore) UpdateCert(ctx context.Context, gcert *certificatemanagerpb.C
 	return nil
 }
 
-func (s *GCPStore) Update(secret *corev1.Secret) error {
+func (s *GCPStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
+	s.SecretNamespace = c.Namespace
 	l := log.WithFields(log.Fields{
-		"action":          "Update",
+		"action":          "Sync",
 		"store":           "gcp",
-		"secretName":      secret.ObjectMeta.Name,
-		"secretNamespace": secret.ObjectMeta.Namespace,
+		"secretName":      s.SecretName,
+		"secretNamespace": s.SecretNamespace,
 	})
 	l.Debugf("Update")
-	c := tlssecret.ParseSecret(secret)
-	if err := s.ParseCertificate(c); err != nil {
-		l.WithError(err).Errorf("vault.ParseCertificate error")
-		return err
-	}
-	gcert := s.secretToGCPCert(secret)
+	gcert := s.certToGCPCert(c)
 	ctx := context.Background()
 	var clientOpts []option.ClientOption
 	if s.SecretName != "" {
 		if err := s.GetApiKey(ctx); err != nil {
 			l.WithError(err).Errorf("gcp.GetApiKey error")
-			return err
+			return nil, err
 		}
 		opt := option.WithCredentialsJSON([]byte(s.CredentialsJSON))
 		clientOpts = append(clientOpts, opt)
@@ -161,40 +156,32 @@ func (s *GCPStore) Update(secret *corev1.Secret) error {
 	client, err := certificatemanager.NewClient(ctx, clientOpts...)
 	if err != nil {
 		l.WithError(err).Errorf("certificatemanager.NewClient error")
-		return err
+		return nil, err
 	}
 	s.client = client
 	l = l.WithFields(log.Fields{
 		"id": s.CertificateName,
 	})
+	var newKeys map[string]string
 	// if there is no secret name, this is the first time we are sending to GCP, create
-	if secret.ObjectMeta.Annotations[state.OperatorName+"/gcp-certificate-name"] == "" {
+	if s.CertificateName == "" {
 		err = s.CreateCert(ctx, gcert)
 		if err != nil {
 			l.WithError(err).Errorf("vault.WriteSecret error")
-			return err
+			return nil, err
 		}
 		// update secret with new cert name
-		secret.ObjectMeta.Annotations[state.OperatorName+"/gcp-certificate-name"] = s.CertificateName
-		sc := state.KubeClient.CoreV1().Secrets(secret.ObjectMeta.Namespace)
-		uo := metav1.UpdateOptions{}
-		_, uerr := sc.Update(
-			context.Background(),
-			secret,
-			uo,
-		)
-		if uerr != nil {
-			l.WithError(uerr).Errorf("sync error")
-			return uerr
+		newKeys = map[string]string{
+			"certificate-name": s.CertificateName,
 		}
 	} else {
 		// secret already has an GCP cert attached, update
 		err = s.UpdateCert(ctx, gcert)
 		if err != nil {
 			l.WithError(err).Errorf("sync error")
-			return err
+			return nil, err
 		}
 	}
 	l.Info("certificate synced")
-	return nil
+	return newKeys, nil
 }

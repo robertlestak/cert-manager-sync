@@ -17,6 +17,7 @@ Enable Kubernetes `cert-manager` to sync TLS certificates to AWS ACM, GCP, Hashi
     - [Heroku](#heroku)
     - [Incapsula](#incapsula)
     - [ThreatX](#threatx)
+  - [Multiple Sync Destinations](#multiple-sync-destinations)
   - [Exponential backoff after a failed sync](#exponential-backoff-after-a-failed-sync)
   - [Forcing an immediate sync](#forcing-an-immediate-sync)
   - [Configuration](#configuration)
@@ -232,6 +233,32 @@ Annotations:
 ```yaml
     cert-manager-sync.lestak.sh/threatx-hostname: "example.com" # threatx hostname to attach cert
     cert-manager-sync.lestak.sh/threatx-secret-name: "example-threatx-api-secret" # secret in same namespace which contains the threatx api key. If provided in format "namespace/secret-name", will look in that namespace for the secret
+```
+
+## Multiple Sync Destinations
+
+You are able to sync to multiple destinations from a single source secret by suffixing your config keys with a common index.
+
+```yaml
+    cert-manager-sync.lestak.sh/incapsula-site-id: "12345" # the default, as seen above
+    cert-manager-sync.lestak.sh/incapsula-secret-name: "cert-manager-sync-poc" # the default, as seen above
+    cert-manager-sync.lestak.sh/incapsula-site-id.0: "67890" # the default, as seen above
+    cert-manager-sync.lestak.sh/incapsula-secret-name.0: "another-secret-here" # the default, as seen above
+    cert-manager-sync.lestak.sh/incapsula-site-id.1: "98765" # the default, as seen above
+    cert-manager-sync.lestak.sh/incapsula-secret-name.1: "and-another-secret-here" # the default, as seen above
+```
+
+Note that if you are using multiple destinations, each key must be defined for each index. For example, if you are syncing to 3 Incapsula sites, but are using the same secret, you still need to define the secret name for each index.
+
+```yaml
+    cert-manager-sync.lestak.sh/incapsula-site-id: "12345" # the default, as seen above
+    cert-manager-sync.lestak.sh/incapsula-secret-name: "cert-manager-sync-poc" # the default, as seen above
+    cert-manager-sync.lestak.sh/incapsula-site-id.0: "67890" # the default, as seen above
+    cert-manager-sync.lestak.sh/incapsula-site-id.1: "98765" # the default, as seen above
+    cert-manager-sync.lestak.sh/incapsula-site-id.2: "54321" # the default, as seen above
+    cert-manager-sync.lestak.sh/incapsula-secret-name.0: "cert-manager-sync-poc" # the default, as seen above
+    cert-manager-sync.lestak.sh/incapsula-secret-name.1: "cert-manager-sync-poc" # the default, as seen above
+    cert-manager-sync.lestak.sh/incapsula-secret-name.2: "cert-manager-sync-poc" # the default, as seen above
 ```
 
 ## Exponential backoff after a failed sync

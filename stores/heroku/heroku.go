@@ -10,7 +10,6 @@ import (
 	"github.com/robertlestak/cert-manager-sync/pkg/state"
 	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
 	log "github.com/sirupsen/logrus"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -35,19 +34,19 @@ func (s *HerokuStore) GetApiKey(ctx context.Context) error {
 	return nil
 }
 
-func (s *HerokuStore) ParseCertificate(c *tlssecret.Certificate) error {
+func (s *HerokuStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error {
 	l := log.WithFields(log.Fields{
-		"action": "ParseCertificate",
+		"action": "FromConfig",
 	})
-	l.Debugf("ParseCertificate")
-	if c.Annotations[state.OperatorName+"/heroku-secret-name"] != "" {
-		s.SecretName = c.Annotations[state.OperatorName+"/heroku-secret-name"]
+	l.Debugf("FromConfig")
+	if c.Config["secret-name"] != "" {
+		s.SecretName = c.Config["secret-name"]
 	}
-	if c.Annotations[state.OperatorName+"/heroku-app"] != "" {
-		s.AppName = c.Annotations[state.OperatorName+"/heroku-app"]
+	if c.Config["app"] != "" {
+		s.AppName = c.Config["app"]
 	}
-	if c.Annotations[state.OperatorName+"/heroku-cert-name"] != "" {
-		s.CertName = c.Annotations[state.OperatorName+"/heroku-cert-name"]
+	if c.Config["cert-name"] != "" {
+		s.CertName = c.Config["cert-name"]
 	}
 	// if secret name is in the format of "namespace/secretname" then parse it
 	if strings.Contains(s.SecretName, "/") {
@@ -57,30 +56,23 @@ func (s *HerokuStore) ParseCertificate(c *tlssecret.Certificate) error {
 	return nil
 }
 
-func (s *HerokuStore) Update(secret *corev1.Secret) error {
+func (s *HerokuStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
+	s.SecretNamespace = c.Namespace
 	l := log.WithFields(log.Fields{
-		"action":          "Update",
+		"action":          "Sync",
 		"store":           "heroku",
 		"appName":         s.AppName,
-		"secretName":      secret.ObjectMeta.Name,
-		"secretNamespace": secret.ObjectMeta.Namespace,
+		"secretName":      s.SecretName,
+		"secretNamespace": s.SecretNamespace,
 	})
 	l.Debugf("Update")
-	c := tlssecret.ParseSecret(secret)
-	if err := s.ParseCertificate(c); err != nil {
-		l.WithError(err).Errorf("ParseCertificate error")
-		return err
-	}
-	if s.SecretNamespace == "" {
-		s.SecretNamespace = secret.Namespace
-	}
 	if s.SecretName == "" {
-		return fmt.Errorf("secret name not found in certificate annotations")
+		return nil, fmt.Errorf("secret name not found in certificate annotations")
 	}
 	ctx := context.Background()
 	if err := s.GetApiKey(ctx); err != nil {
 		l.WithError(err).Errorf("GetApiKey error")
-		return err
+		return nil, err
 	}
 	client := heroku.NewService(&http.Client{
 		Transport: &heroku.Transport{
@@ -96,7 +88,7 @@ func (s *HerokuStore) Update(secret *corev1.Secret) error {
 		ep, err := client.SniEndpointCreate(ctx, s.AppName, sniOpts)
 		if err != nil {
 			l.WithError(err).Errorf("heroku.SniEndpointCreate error")
-			return err
+			return nil, err
 		}
 		l.Debugf("heroku.SniEndpointCreate success: %s", ep.Name)
 		s.CertName = ep.Name
@@ -108,7 +100,7 @@ func (s *HerokuStore) Update(secret *corev1.Secret) error {
 		ep, err := client.SniEndpointUpdate(ctx, s.AppName, s.CertName, sniOpts)
 		if err != nil {
 			l.WithError(err).Errorf("heroku.SniEndpointUpdate error")
-			return err
+			return nil, err
 		}
 		l.Debugf("heroku.SniEndpointUpdate success: %s", ep.Name)
 		s.CertName = ep.Name
@@ -116,22 +108,12 @@ func (s *HerokuStore) Update(secret *corev1.Secret) error {
 	l = l.WithFields(log.Fields{
 		"id": s.CertName,
 	})
+	var keyUpdates map[string]string
 	if origCertName != s.CertName {
-		secret.ObjectMeta.Annotations[state.OperatorName+"/heroku-cert-name"] = s.CertName
-		sc := state.KubeClient.CoreV1().Secrets(secret.ObjectMeta.Namespace)
-		uo := metav1.UpdateOptions{
-			FieldManager: state.OperatorName,
-		}
-		_, uerr := sc.Update(
-			context.Background(),
-			secret,
-			uo,
-		)
-		if uerr != nil {
-			l.WithError(uerr).Errorf("sync error")
-			return uerr
+		keyUpdates = map[string]string{
+			"cert-name": s.CertName,
 		}
 	}
 	l.Info("certificate synced")
-	return nil
+	return keyUpdates, nil
 }
