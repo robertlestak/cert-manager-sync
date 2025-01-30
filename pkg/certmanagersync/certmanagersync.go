@@ -282,6 +282,7 @@ func HandleSecret(s *corev1.Secret) error {
 		return err
 	}
 	if len(errs) > 0 {
+		l.WithField("errs", errs).Errorf("errors syncing secret")
 		state.EventRecorder.Event(s, corev1.EventTypeWarning, "SyncFailed", fmt.Sprintf("Secret sync failed to %d store%s", len(errs), func() string {
 			if len(errs) == 1 {
 				return ""
@@ -290,12 +291,14 @@ func HandleSecret(s *corev1.Secret) error {
 		}()))
 		return fmt.Errorf("errors syncing secret %s/%s: %v", s.Namespace, s.Name, errs)
 	}
-	eventMsg := fmt.Sprintf("Secret synced to %d store%s", len(cert.Syncs), func() string {
+	scf := func() string {
 		if len(cert.Syncs) == 1 {
 			return ""
 		}
 		return "s"
-	}())
+	}()
+	l.Infof("Secret synced to %d store%s", len(cert.Syncs), scf)
+	eventMsg := fmt.Sprintf("Secret synced to %d store%s", len(cert.Syncs), scf)
 	state.EventRecorder.Event(s, corev1.EventTypeNormal, "Synced", eventMsg)
 	return nil
 }
