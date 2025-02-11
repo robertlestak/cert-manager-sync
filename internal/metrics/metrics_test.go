@@ -31,15 +31,12 @@ func TestInitMetrics(t *testing.T) {
 }
 
 func TestServe(t *testing.T) {
-	// Mock environment variable
-	os.Setenv("METRICS_PORT", "9091")
-
 	// Mock log output to prevent actual logging during tests
 	logrus.SetOutput(os.Stdout)
 	logrus.SetLevel(logrus.PanicLevel)
 
 	// Start the metrics server in a separate goroutine
-	go Serve()
+	go Serve(9091, "/metrics")
 
 	// Wait a moment for the server to start
 	time.Sleep(100 * time.Millisecond)
@@ -53,7 +50,4 @@ func TestServe(t *testing.T) {
 	resp, err = http.Get("http://localhost:9091/metrics")
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
-
-	// Cleanup: reset the environment variable
-	os.Unsetenv("METRICS_PORT")
 }

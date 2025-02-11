@@ -7,11 +7,13 @@ import (
 	"strings"
 
 	"github.com/digitalocean/godo"
-	"github.com/robertlestak/cert-manager-sync/pkg/state"
-	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/oauth2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/robertlestak/cert-manager-sync/pkg/state"
+	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
+	"github.com/robertlestak/cert-manager-sync/stores"
 )
 
 type DigitalOceanStore struct {
@@ -35,13 +37,26 @@ func (s *DigitalOceanStore) GetApiKey(ctx context.Context) error {
 	return nil
 }
 
-func (s *DigitalOceanStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error {
-	l := log.WithFields(log.Fields{
-		"action": "FromConfig",
-	})
-	l.Debugf("FromConfig")
+func New(c tlssecret.GenericSecretSyncConfig) (stores.RemoteStore, error) {
+	var s = &DigitalOceanStore{}
 	if c.Config["secret-name"] != "" {
 		s.SecretName = c.Config["secret-name"]
+	}
+	if c.Config["secret-namespace"] != "" {
+		s.SecretNamespace = c.Config["secret-namespace"]
+	}
+	// if secret name is in the format of "namespace/secretname" then parse it
+	if strings.Contains(s.SecretName, "/") {
+		if parts := strings.Split(s.SecretName, "/"); len(parts) == 2 {
+			s.SecretNamespace = parts[0]
+			s.SecretName = parts[1]
+		}
+	}
+	if s.SecretName == "" {
+		return nil, stores.ErrSecretNameNotFound
+	}
+	if s.SecretNamespace == "" {
+		return nil, stores.ErrSecretNamespaceNotFound
 	}
 	if c.Config["cert-name"] != "" {
 		s.CertName = c.Config["cert-name"]
@@ -49,12 +64,8 @@ func (s *DigitalOceanStore) FromConfig(c tlssecret.GenericSecretSyncConfig) erro
 	if c.Config["cert-id"] != "" {
 		s.CertId = c.Config["cert-id"]
 	}
-	// if secret name is in the format of "namespace/secretname" then parse it
-	if strings.Contains(s.SecretName, "/") {
-		s.SecretNamespace = strings.Split(s.SecretName, "/")[0]
-		s.SecretName = strings.Split(s.SecretName, "/")[1]
-	}
-	return nil
+
+	return s, nil
 }
 
 func separateCertsDO(ca, crt, key []byte) *godo.CertificateRequest {
@@ -86,9 +97,7 @@ func (s *DigitalOceanStore) Sync(c *tlssecret.Certificate) (map[string]string, e
 		"secretNamespace": s.SecretNamespace,
 	})
 	l.Debugf("Update")
-	if s.SecretName == "" {
-		return nil, fmt.Errorf("secret name not found in certificate annotations")
-	}
+
 	ctx := context.Background()
 	if err := s.GetApiKey(ctx); err != nil {
 		l.WithError(err).Errorf("GetApiKey error")
@@ -124,4 +133,8 @@ func (s *DigitalOceanStore) Sync(c *tlssecret.Certificate) (map[string]string, e
 	}
 	l.Info("certificate synced")
 	return newKeys, nil
+}
+
+func init() {
+	stores.Register("digitalocean", stores.StoreCreatorFunc(New))
 }

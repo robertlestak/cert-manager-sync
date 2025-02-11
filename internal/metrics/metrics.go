@@ -1,7 +1,7 @@
 package metrics
 
 import (
-	"cmp"
+	"fmt"
 	"net/http"
 	"os"
 
@@ -33,18 +33,19 @@ func init() {
 	InitMetrics()
 }
 
-func Serve() {
+func Serve(port int, path string) {
 	l := log.WithFields(log.Fields{
-		"pkg": "metrics",
-		"fn":  "Serve",
+		"pkg":  "metrics",
+		"fn":   "Serve",
+		"port": port,
+		"path": path,
 	})
-	l.Debug("starting metrics server")
-	port := cmp.Or(os.Getenv("METRICS_PORT"), "9090")
+	l.Info("starting metrics server")
 	http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	http.Handle("/metrics", promhttp.Handler())
-	if err := http.ListenAndServe(":"+port, nil); err != nil {
+	http.Handle(path, promhttp.Handler())
+	if err := http.ListenAndServe(fmt.Sprintf(":%d", port), nil); err != nil {
 		l.WithError(err).Error("error starting http server")
 		os.Exit(1)
 	}

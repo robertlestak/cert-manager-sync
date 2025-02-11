@@ -1,6 +1,8 @@
 package tlssecret
 
 import (
+	"fmt"
+
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -35,4 +37,12 @@ func (c *Certificate) FullChain() []byte {
 		return append(append(c.Certificate, '\n'), c.Ca...)
 	}
 	return c.Certificate
+}
+
+func GetValue(s *corev1.Secret, k string) ([]byte, error) {
+	v, ok := s.Data[k]
+	if !ok {
+		return nil, fmt.Errorf("%s not found in secret %s/%s", k, s.GetNamespace(), s.GetName())
+	}
+	return v, nil
 }
