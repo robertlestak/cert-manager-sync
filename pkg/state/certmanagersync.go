@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -14,10 +13,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/record"
-	"k8s.io/client-go/util/homedir"
+	clientconfig "sigs.k8s.io/controller-runtime/pkg/client/config"
 )
 
 var (
@@ -135,17 +132,13 @@ func CacheChanged(s *corev1.Secret) bool {
 			"secretName": s.ObjectMeta.Name,
 		},
 	)
-	l.Debug("checking cacheChanged")
+
 	if os.Getenv("CACHE_DISABLE") == "true" {
 		l.Debug("cache disabled")
 		return true
 	}
 	secretHash := HashSecret(s)
 	existingHash := cmsHash(s)
-	l = l.WithFields(log.Fields{
-		"secretHash":   secretHash,
-		"existingHash": existingHash,
-	})
 	l.Debugf("secretHash=%s existingHash=%s", secretHash, existingHash)
 	if secretHash != existingHash {
 		l.Debugf("cache changed")
@@ -162,27 +155,10 @@ func CreateKubeClient() error {
 		},
 	)
 	l.Debug("get createKubeClient")
-	var kubeconfig string
-	var err error
-	if os.Getenv("KUBECONFIG") != "" {
-		kubeconfig = os.Getenv("KUBECONFIG")
-	} else if home := homedir.HomeDir(); home != "" {
-		kubeconfig = filepath.Join(home, ".kube", "config")
-	}
-	var config *rest.Config
-	// naïvely assume if no kubeconfig file that we are running in cluster
-	if _, err := os.Stat(kubeconfig); os.IsNotExist(err) {
-		config, err = rest.InClusterConfig()
-		if err != nil {
-			l.Debugf("res.InClusterConfig error=%v", err)
-			return err
-		}
-	} else {
-		config, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
-		if err != nil {
-			l.Debugf("clientcmd.BuildConfigFromFlags error=%v", err)
-			return err
-		}
+
+	config, err := clientconfig.GetConfig()
+	if err != nil {
+		return err
 	}
 	KubeClient, err = kubernetes.NewForConfig(config)
 	if err != nil {

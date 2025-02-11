@@ -7,10 +7,12 @@ import (
 	"strings"
 
 	heroku "github.com/heroku/heroku-go/v5"
-	"github.com/robertlestak/cert-manager-sync/pkg/state"
-	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
 	log "github.com/sirupsen/logrus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/robertlestak/cert-manager-sync/pkg/state"
+	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
+	"github.com/robertlestak/cert-manager-sync/stores"
 )
 
 type HerokuStore struct {
@@ -34,13 +36,26 @@ func (s *HerokuStore) GetApiKey(ctx context.Context) error {
 	return nil
 }
 
-func (s *HerokuStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error {
-	l := log.WithFields(log.Fields{
-		"action": "FromConfig",
-	})
-	l.Debugf("FromConfig")
+func New(c tlssecret.GenericSecretSyncConfig) (stores.RemoteStore, error) {
+	s := &HerokuStore{}
 	if c.Config["secret-name"] != "" {
 		s.SecretName = c.Config["secret-name"]
+	}
+	if c.Config["secret-namespace"] != "" {
+		s.SecretNamespace = c.Config["secret-namespace"]
+	}
+	// if secret name is in the format of "namespace/secretname" then parse it
+	if strings.Contains(s.SecretName, "/") {
+		if parts := strings.Split(s.SecretName, "/"); len(parts) == 2 {
+			s.SecretNamespace = parts[0]
+			s.SecretName = parts[1]
+		}
+	}
+	if s.SecretName == "" {
+		return nil, stores.ErrSecretNameNotFound
+	}
+	if s.SecretNamespace == "" {
+		return nil, stores.ErrSecretNamespaceNotFound
 	}
 	if c.Config["app"] != "" {
 		s.AppName = c.Config["app"]
@@ -48,12 +63,8 @@ func (s *HerokuStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error {
 	if c.Config["cert-name"] != "" {
 		s.CertName = c.Config["cert-name"]
 	}
-	// if secret name is in the format of "namespace/secretname" then parse it
-	if strings.Contains(s.SecretName, "/") {
-		s.SecretNamespace = strings.Split(s.SecretName, "/")[0]
-		s.SecretName = strings.Split(s.SecretName, "/")[1]
-	}
-	return nil
+
+	return s, nil
 }
 
 func (s *HerokuStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
@@ -66,9 +77,7 @@ func (s *HerokuStore) Sync(c *tlssecret.Certificate) (map[string]string, error) 
 		"secretNamespace": s.SecretNamespace,
 	})
 	l.Debugf("Update")
-	if s.SecretName == "" {
-		return nil, fmt.Errorf("secret name not found in certificate annotations")
-	}
+
 	ctx := context.Background()
 	if err := s.GetApiKey(ctx); err != nil {
 		l.WithError(err).Errorf("GetApiKey error")
@@ -116,4 +125,8 @@ func (s *HerokuStore) Sync(c *tlssecret.Certificate) (map[string]string, error) 
 	}
 	l.Info("certificate synced")
 	return keyUpdates, nil
+}
+
+func init() {
+	stores.Register("heroku", stores.StoreCreatorFunc(New))
 }
