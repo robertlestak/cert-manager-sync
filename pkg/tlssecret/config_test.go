@@ -3,9 +3,10 @@ package tlssecret
 import (
 	"testing"
 
-	"github.com/robertlestak/cert-manager-sync/pkg/state"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/robertlestak/cert-manager-sync/pkg/state"
 )
 
 func mapsEqual(m1, m2 map[string]string) bool {

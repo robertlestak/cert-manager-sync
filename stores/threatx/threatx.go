@@ -11,10 +11,12 @@ import (
 	"os"
 	"strings"
 
-	"github.com/robertlestak/cert-manager-sync/pkg/state"
-	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
 	log "github.com/sirupsen/logrus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/robertlestak/cert-manager-sync/pkg/state"
+	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
+	"github.com/robertlestak/cert-manager-sync/stores"
 )
 
 type ThreatXStore struct {
@@ -267,22 +269,32 @@ func (s *ThreatXStore) UpdateSite(ctx context.Context, tx ThreatXSite) error {
 	return nil
 }
 
-func (s *ThreatXStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error {
-	l := log.WithFields(log.Fields{
-		"func": "ThreatXStore.FromConfig",
-	})
-	l.Debug("start")
+func New(c tlssecret.GenericSecretSyncConfig) (stores.RemoteStore, error) {
+	s := &ThreatXStore{}
 	if c.Config["secret-name"] != "" {
 		s.SecretName = c.Config["secret-name"]
+	}
+	if c.Config["secret-namespace"] != "" {
+		s.SecretNamespace = c.Config["secret-namespace"]
+	}
+	// if secret name is in the format of "namespace/secretname" then parse it
+	if strings.Contains(s.SecretName, "/") {
+		if parts := strings.Split(s.SecretName, "/"); len(parts) == 2 {
+			s.SecretNamespace = parts[0]
+			s.SecretName = parts[1]
+		}
+	}
+	if s.SecretName == "" {
+		return nil, stores.ErrSecretNameNotFound
+	}
+	if s.SecretNamespace == "" {
+		return nil, stores.ErrSecretNamespaceNotFound
 	}
 	if c.Config["hostname"] != "" {
 		s.Hostname = c.Config["hostname"]
 	}
-	if strings.Contains(s.SecretName, "/") {
-		s.SecretNamespace = strings.Split(s.SecretName, "/")[0]
-		s.SecretName = strings.Split(s.SecretName, "/")[1]
-	}
-	return nil
+
+	return s, nil
 }
 
 func (s *ThreatXStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
@@ -319,4 +331,8 @@ func (s *ThreatXStore) Sync(c *tlssecret.Certificate) (map[string]string, error)
 	}
 	l.Info("certificate synced")
 	return nil, nil
+}
+
+func init() {
+	stores.Register("threatx", stores.StoreCreatorFunc(New))
 }

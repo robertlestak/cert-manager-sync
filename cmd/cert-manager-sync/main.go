@@ -2,27 +2,51 @@ package main
 
 import (
 	"cmp"
+	"flag"
+	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
-	"github.com/robertlestak/cert-manager-sync/internal/metrics"
-	"github.com/robertlestak/cert-manager-sync/pkg/certmanagersync"
-	"github.com/robertlestak/cert-manager-sync/pkg/state"
+	"github.com/prometheus/common/version"
 	log "github.com/sirupsen/logrus"
+	"github.com/spf13/pflag"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/tools/cache"
+
+	"github.com/robertlestak/cert-manager-sync/internal/metrics"
+	"github.com/robertlestak/cert-manager-sync/pkg/certmanagersync"
+	"github.com/robertlestak/cert-manager-sync/pkg/flags"
+	"github.com/robertlestak/cert-manager-sync/pkg/state"
 )
 
+var metricsPort int
+
 func init() {
-	ll, lerr := log.ParseLevel(cmp.Or(os.Getenv("LOG_LEVEL"), "info"))
+	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
+	logLevel := pflag.String("log.level", "info", "log level")
+	logFmt := pflag.String("log.format", "console", "log format")
+	printVersion := pflag.BoolP("version", "v", false, "print version info")
+	pflag.IntVar(&metricsPort, "metrics.port", 9090, "http port for metrics handler, 0 means disable")
+
+	flags.SetFromEnv(pflag.CommandLine)
+	pflag.Parse()
+
+	if *printVersion {
+		fmt.Println(version.Print(filepath.Base(os.Args[0])))
+		os.Exit(0)
+	}
+
+	ll, lerr := log.ParseLevel(*logLevel)
 	if lerr != nil {
 		ll = log.InfoLevel
 	}
 	log.SetLevel(ll)
-	if os.Getenv("LOG_FORMAT") == "json" {
+	if *logFmt == "json" {
 		log.SetFormatter(&log.JSONFormatter{})
 	}
+
 	l := log.WithFields(
 		log.Fields{
 			"action": "init",
@@ -42,8 +66,8 @@ func main() {
 		},
 	)
 	l.Info("starting cert-manager-sync")
-	if os.Getenv("ENABLE_METRICS") != "false" {
-		go metrics.Serve()
+	if metricsPort > 0 {
+		go metrics.Serve(metricsPort, "/metrics")
 	}
 	factory := informers.NewSharedInformerFactory(state.KubeClient, 30*time.Second)
 	secretInformer := factory.Core().V1().Secrets().Informer()

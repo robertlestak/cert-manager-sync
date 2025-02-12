@@ -13,9 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/robertlestak/cert-manager-sync/pkg/state"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/robertlestak/cert-manager-sync/pkg/state"
 )
 
 func TestParseSecret(t *testing.T) {
