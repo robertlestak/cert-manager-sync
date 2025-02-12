@@ -52,10 +52,8 @@ spec:
             value: "{{ .Values.config.logLevel }}"
           - name: LOG_FORMAT
             value: "{{ .Values.config.logFormat }}"
-          - name: CACHE_DISABLE
+          - name: CACHE_DISABLED
             value: "{{ .Values.config.disableCache }}"
-          - name: ENABLE_METRICS
-            value: "{{ .Values.metrics.enabled }}"
           - name: METRICS_PORT
             value: "{{ .Values.metrics.port }}"
           {{- with .Values.env }}

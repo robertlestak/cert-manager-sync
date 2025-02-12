@@ -17,6 +17,7 @@ Enable Kubernetes `cert-manager` to sync TLS certificates to AWS ACM, GCP, Hashi
     - [Heroku](#heroku)
     - [Incapsula](#incapsula)
     - [ThreatX](#threatx)
+    - [Tencent Cloud](#tencent-cloud)
   - [Multiple Sync Destinations](#multiple-sync-destinations)
   - [Exponential backoff after a failed sync](#exponential-backoff-after-a-failed-sync)
   - [Forcing an immediate sync](#forcing-an-immediate-sync)
@@ -37,7 +38,7 @@ In containerized environments, we use `cert-manager` to automatically provision,
 
 These certificates are managed entirely through code using git ops, and developers / operators never need to touch / see the actual plain-text certificate as it is automatically provisioned and attached to gateway.
 
-However for applications that sit behind the Incapsula WAF, or have components in both EKS and CloudFront, there was not a seamless and secure process to attach certificates without operators manually passing DNS01 challenge records back and forth or worse, passing TLS certs back and forth. 
+However for applications that sit behind the Incapsula WAF, or have components in both EKS and CloudFront, there was not a seamless and secure process to attach certificates without operators manually passing DNS01 challenge records back and forth or worse, passing TLS certs back and forth.
 
 In addition to the security risk this poses, it also introduces a level of human error and manual tracking of expiry / renewals.
 
@@ -235,6 +236,29 @@ Annotations:
     cert-manager-sync.lestak.sh/threatx-secret-name: "example-threatx-api-secret" # secret in same namespace which contains the threatx api key. If provided in format "namespace/secret-name", will look in that namespace for the secret
 ```
 
+### Tencent Cloud
+
+Create a TencentCloud API Key and create a kube secret in whatever namespace you want.
+
+```bash
+kubectl -n cert-manager \
+	create secret generic tencentcloud-api-secret \
+	--from-literal TENCENTCLOUD_SECRET_ID=XXXXX --from-literal TENCENTCLOUD_SECRET_KEY=XXXXX
+```
+
+You will then annotate your k8s TLS secret with this secret name to tell the operator to retrieve the TencentCloud API secret from this location.
+
+Annotations:
+
+```yaml
+    cert-manager-sync.lestak.sh/tencentcloud-secret-name: "tencentcloud-api-secret" # namespace/name of the secret which contains the api key. If provided in format "namespace/secret-name", will look in that namespace for the secret
+    cert-manager-sync.lestak.sh/tencentcloud-secretIdKeyName: "TENCENTCLOUD_SECRET_ID" # keyname of the secret id in k8s secret
+    cert-manager-sync.lestak.sh/tencentcloud-secretKeyKeyName: "TENCENTCLOUD_SECRET_KEY" # keyname of the secret key in k8s secret
+    cert-manager-sync.lestak.sh/tencentcloud-alias: "xxx" # alias of the uploaded cert
+    cert-manager-sync.lestak.sh/tencentcloud-projectId: "1" # project id of the uploaded cert, must be a uint64
+    cert-manager-sync.lestak.sh/tencentcloud-resources: "cdn,waf,teo" # resource type that will be deployed with the cert
+```
+
 ## Multiple Sync Destinations
 
 You are able to sync to multiple destinations from a single source secret by suffixing your config keys with a common index.
@@ -398,9 +422,8 @@ ENABLED_NAMESPACES= # csv of namespaces to watch. default is empty (all namespac
 SECRETS_NAMESPACE= # DEPRECATED, replaced by ENABLED_NAMESPACES. Namespace to look for secrets in. overrides ENABLED_NAMESPACES if set
 OPERATOR_NAME=cert-manager-sync.lestak.sh # Operator name. use for white-labeling
 LOG_LEVEL=info # Log level. trace, debug, info, warn, error, fatal
-CACHE_DISABLE=false # Disable cache
+CACHE_DISABLED=false # Disable cache
 METRICS_PORT=9090 # Metrics port
-ENABLE_METRICS=true # Enable metrics server
 ```
 
 If deploying with helm, these are exposed as values in the `values.yaml` file.
