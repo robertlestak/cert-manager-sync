@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	log "github.com/sirupsen/logrus"
+	"github.com/spf13/pflag"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -18,10 +19,19 @@ import (
 )
 
 var (
-	OperatorName  = "cert-manager-sync.lestak.sh"
-	KubeClient    *kubernetes.Clientset
-	EventRecorder record.EventRecorder
+	OperatorName       = "cert-manager-sync.lestak.sh"
+	KubeClient         *kubernetes.Clientset
+	EventRecorder      record.EventRecorder
+	disabledNamespaces []string
+	enabledNamespaces  []string
+	cacheDisabled      bool
 )
+
+func init() {
+	pflag.StringSliceVar(&disabledNamespaces, "disabled.namespaces", nil, "disabled namespaces")
+	pflag.StringSliceVar(&enabledNamespaces, "enabled.namespaces", nil, "namespaces to be watched, an empty value indicates all namespaces")
+	pflag.BoolVar(&cacheDisabled, "cache.disabled", false, "disable internal cache")
+}
 
 // kvPair represents a key-value pair.
 type kvPair struct {
@@ -133,8 +143,7 @@ func CacheChanged(s *corev1.Secret) bool {
 		},
 	)
 
-	if os.Getenv("CACHE_DISABLE") == "true" {
-		l.Debug("cache disabled")
+	if cacheDisabled {
 		return true
 	}
 	secretHash := HashSecret(s)
@@ -175,14 +184,12 @@ func CreateKubeClient() error {
 }
 
 func namespaceDisabled(n string) bool {
-	// if DISABLED_NAMESPACES is set, don't watch those namespaces
-	disabledNs := strings.Split(os.Getenv("DISABLED_NAMESPACES"), ",")
-	for _, ns := range disabledNs {
+	// if disabledNamespaces is set, don't watch those namespaces
+	for _, ns := range disabledNamespaces {
 		if ns == n {
 			return true
 		}
 	}
-	// if DISABLED_NAMESPACES is not set, watch all namespaces
 	return false
 }
 
@@ -190,24 +197,21 @@ func namespaceEnabled(n string) bool {
 	// SECRETS_NAMESPACE is deprecated and has been replaced by ENABLED_NAMESPACES.
 	// SECRETS_NAMESPACE will be removed in a future release
 	// if a single SECRETS_NAMESPACE is set, only watch that namespace
-	if os.Getenv("SECRETS_NAMESPACE") != "" && n != os.Getenv("SECRETS_NAMESPACE") {
-		return false
-	} else if os.Getenv("SECRETS_NAMESPACE") != "" && n == os.Getenv("SECRETS_NAMESPACE") {
+	if v, ok := os.LookupEnv("SECRETS_NAMESPACE"); ok {
+		return n == v
+	}
+
+	if len(enabledNamespaces) == 0 {
 		return true
 	}
-	// if ENABLED_NAMESPACES is set, only watch those namespaces
-	if os.Getenv("ENABLED_NAMESPACES") != "" {
-		enabledNs := strings.Split(os.Getenv("ENABLED_NAMESPACES"), ",")
-		for _, ns := range enabledNs {
-			if ns == n {
-				return true
-			}
+
+	// if enabledNamespaces is set, only watch those namespaces
+	for _, ns := range enabledNamespaces {
+		if ns == n {
+			return true
 		}
-		// if ENABLED_NAMESPACES is set, but the namespace is not in the list, don't watch
-		return false
 	}
-	// if ENABLED_NAMESPACES is not set, watch all namespaces
-	return true
+	return false
 }
 
 func SecretWatched(s *corev1.Secret) bool {

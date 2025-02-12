@@ -3,9 +3,12 @@ package main
 import (
 	"cmp"
 	"flag"
+	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
+	"github.com/prometheus/common/version"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 	v1 "k8s.io/api/core/v1"
@@ -24,10 +27,16 @@ func init() {
 	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
 	logLevel := pflag.String("log.level", "info", "log level")
 	logFmt := pflag.String("log.format", "console", "log format")
+	printVersion := pflag.BoolP("version", "v", false, "print version info")
 	pflag.IntVar(&metricsPort, "metrics.port", 9090, "http port for metrics handler, 0 means disable")
 
 	flags.SetFromEnv(pflag.CommandLine)
 	pflag.Parse()
+
+	if *printVersion {
+		fmt.Println(version.Print(filepath.Base(os.Args[0])))
+		os.Exit(0)
+	}
 
 	ll, lerr := log.ParseLevel(*logLevel)
 	if lerr != nil {
