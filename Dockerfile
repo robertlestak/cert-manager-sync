@@ -1,4 +1,4 @@
-FROM golang:1.22.5 as builder
+FROM golang:1.24 as builder
 
 WORKDIR /app
 
@@ -10,7 +10,7 @@ RUN go mod download && go mod verify
 
 RUN CGO_ENABLED=0 go build -o /app/cert-manager-sync cmd/cert-manager-sync/*.go
 
-FROM alpine:3.21 as alpine
+FROM alpine:3 as alpine
 
 RUN apk add -U --no-cache ca-certificates
 
