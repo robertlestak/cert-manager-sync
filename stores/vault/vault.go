@@ -8,8 +8,10 @@ import (
 	"strings"
 
 	"github.com/hashicorp/vault/api"
-	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
+	"github.com/robertlestak/cert-manager-sync/stores"
 )
 
 type VaultStore struct {
@@ -156,11 +158,8 @@ func (s *VaultStore) WriteSecret(sec map[string]interface{}) (map[string]interfa
 	return secrets, nil
 }
 
-func (s *VaultStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error {
-	l := log.WithFields(log.Fields{
-		"action": "FromConfig",
-	})
-	l.Debugf("FromConfig")
+func New(c tlssecret.GenericSecretSyncConfig) (stores.RemoteStore, error) {
+	s := &VaultStore{}
 	if c.Config["path"] != "" {
 		s.Path = c.Config["path"]
 	}
@@ -179,7 +178,7 @@ func (s *VaultStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error {
 	if c.Config["base64-decode"] == "true" || c.Config["b64dec"] == "true" {
 		s.Base64Decode = true
 	}
-	return nil
+	return s, nil
 }
 
 func writeSecretValue(value []byte, asString bool) any {
@@ -237,4 +236,8 @@ func (s *VaultStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
 	}
 	l.Info("certificate synced")
 	return nil, nil
+}
+
+func init() {
+	stores.Register("vault", stores.StoreCreatorFunc(New))
 }

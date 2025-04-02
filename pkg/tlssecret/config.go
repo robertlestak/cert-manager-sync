@@ -4,10 +4,10 @@ import (
 	"strconv"
 	"strings"
 
-	cmtypes "github.com/robertlestak/cert-manager-sync/internal/types"
-	"github.com/robertlestak/cert-manager-sync/pkg/state"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
+
+	"github.com/robertlestak/cert-manager-sync/pkg/state"
 )
 
 type GenericSecretSyncConfig struct {
@@ -17,40 +17,22 @@ type GenericSecretSyncConfig struct {
 	Updates map[string]string
 }
 
-func IsStoreAnnotation(k string) bool {
-	if !strings.HasPrefix(k, state.OperatorName+"/") {
-		return false
-	}
-	parts := strings.Split(k, "/")
-	key := parts[1]
-	if !strings.Contains(key, "-") {
-		return false
-	}
-	// get the first element after the operator name
-	// and check if it is a valid store name
-	storeParts := strings.Split(key, "-")
-	storeName := storeParts[0]
-	if storeName == "" {
-		return false
-	}
-	if !cmtypes.IsValidStoreType(storeName) {
-		return false
-	}
-	return true
-}
-
 func ParseStoreAnnotation(k string) (string, string) {
 	// we expect the annotation key to be in the format:
 	// OperatorName + "/<store>-" + <key>
 	// we want to return <store> and <key>
-	parts := strings.Split(k, "/")
-	if len(parts) != 2 {
+	if !strings.HasPrefix(k, state.OperatorName+"/") {
 		return "", ""
 	}
-	storeParts := strings.Split(parts[1], "-")
-	storeName := storeParts[0]
-	key := strings.Join(storeParts[1:], "-")
-	return storeName, key
+	parts := strings.Split(k, "/")
+	if len(parts) != 2 || parts[1] == "" {
+		return "", ""
+	}
+	storeParts := strings.SplitN(parts[1], "-", 2)
+	if len(storeParts) != 2 || storeParts[1] == "" {
+		return "", ""
+	}
+	return storeParts[0], storeParts[1]
 }
 
 func GetSecretStoresMeta(s *v1.Secret) map[string][]map[string]string {
@@ -61,9 +43,7 @@ func GetSecretStoresMeta(s *v1.Secret) map[string][]map[string]string {
 	// for all annotations with the prefix
 	stores := make(map[string][]map[string]string)
 	for k, v := range s.Annotations {
-		if !IsStoreAnnotation(k) {
-			continue
-		}
+		// allow unknown store annotations but trigger event later
 		store, key := ParseStoreAnnotation(k)
 		if store == "" {
 			continue
@@ -78,7 +58,7 @@ func GetSecretStoresMeta(s *v1.Secret) map[string][]map[string]string {
 
 func SecretMetaToGenericSecretSyncConfig(meta map[string][]map[string]string) ([]*GenericSecretSyncConfig, error) {
 	// for each store, the keys will be a provider-specific key, eg, "arn-role"
-	// howeer to enable multiple configurations for a single secret, users can
+	// however to enable multiple configurations for a single secret, users can
 	// suffix a key with an index, eg "arn-role.0"
 	// that way, all the keys with the same index will be grouped together
 	// we need to remove the .0 suffix from the string, so the key is "arn-role"

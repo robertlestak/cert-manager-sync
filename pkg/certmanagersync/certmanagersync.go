@@ -7,60 +7,27 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/robertlestak/cert-manager-sync/internal/metrics"
-	cmtypes "github.com/robertlestak/cert-manager-sync/internal/types"
-	"github.com/robertlestak/cert-manager-sync/pkg/state"
-	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
-	"github.com/robertlestak/cert-manager-sync/stores/acm"
-	"github.com/robertlestak/cert-manager-sync/stores/cloudflare"
-	"github.com/robertlestak/cert-manager-sync/stores/digitalocean"
-	"github.com/robertlestak/cert-manager-sync/stores/filepath"
-	"github.com/robertlestak/cert-manager-sync/stores/gcpcm"
-	"github.com/robertlestak/cert-manager-sync/stores/heroku"
-	"github.com/robertlestak/cert-manager-sync/stores/incapsula"
-	"github.com/robertlestak/cert-manager-sync/stores/threatx"
-	"github.com/robertlestak/cert-manager-sync/stores/vault"
 	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+
+	_ "github.com/robertlestak/cert-manager-sync/stores/acm"
+	_ "github.com/robertlestak/cert-manager-sync/stores/cloudflare"
+	_ "github.com/robertlestak/cert-manager-sync/stores/digitalocean"
+	_ "github.com/robertlestak/cert-manager-sync/stores/filepath"
+	_ "github.com/robertlestak/cert-manager-sync/stores/gcpcm"
+	_ "github.com/robertlestak/cert-manager-sync/stores/heroku"
+	_ "github.com/robertlestak/cert-manager-sync/stores/incapsula"
+	_ "github.com/robertlestak/cert-manager-sync/stores/tencentcloud"
+	_ "github.com/robertlestak/cert-manager-sync/stores/threatx"
+	_ "github.com/robertlestak/cert-manager-sync/stores/vault"
+
+	"github.com/robertlestak/cert-manager-sync/internal/metrics"
+	"github.com/robertlestak/cert-manager-sync/pkg/state"
+	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
+	"github.com/robertlestak/cert-manager-sync/stores"
 )
-
-type RemoteStore interface {
-	Sync(cert *tlssecret.Certificate) (map[string]string, error)
-	FromConfig(config tlssecret.GenericSecretSyncConfig) error
-}
-
-func NewStore(storeType cmtypes.StoreType) (RemoteStore, error) {
-	l := log.WithFields(log.Fields{
-		"action": "NewStore",
-	})
-	l.Debugf("NewStore %s", storeType)
-	var store RemoteStore
-	switch storeType {
-	case cmtypes.ACMStoreType:
-		store = &acm.ACMStore{}
-	case cmtypes.CloudflareStoreType:
-		store = &cloudflare.CloudflareStore{}
-	case cmtypes.DigitalOceanStoreType:
-		store = &digitalocean.DigitalOceanStore{}
-	case cmtypes.FilepathStoreType:
-		store = &filepath.FilepathStore{}
-	case cmtypes.GCPStoreType:
-		store = &gcpcm.GCPStore{}
-	case cmtypes.HerokuStoreType:
-		store = &heroku.HerokuStore{}
-	case cmtypes.IncapsulaStoreType:
-		store = &incapsula.IncapsulaStore{}
-	case cmtypes.ThreatxStoreType:
-		store = &threatx.ThreatXStore{}
-	case cmtypes.VaultStoreType:
-		store = &vault.VaultStore{}
-	default:
-		return nil, cmtypes.ErrInvalidStoreType
-	}
-	return store, nil
-}
 
 // maxRetries returns the max number of sync attempts allowed for a secret
 // if the secret has a max-sync-attempts annotation
@@ -114,7 +81,7 @@ func nextRetryTime(s *corev1.Secret) time.Time {
 		"namespace": s.Namespace,
 		"name":      s.Name,
 	})
-	l.Debug("nextRetryTime")
+
 	if s.Annotations == nil {
 		return time.Time{}
 	}
@@ -183,7 +150,7 @@ func HandleSecret(s *corev1.Secret) error {
 		"namespace": s.Namespace,
 		"name":      s.Name,
 	})
-	l.Debugf("HandleSecret %s/%s", s.Namespace, s.Name)
+
 	// ensure we haven't exceeded the allotted retries
 	if !readyToRetry(s) {
 		l.Debug("not ready to retry")
@@ -191,7 +158,6 @@ func HandleSecret(s *corev1.Secret) error {
 	}
 	// check if the secret has changed since last sync
 	if !state.CacheChanged(s) {
-		l.Debug("cache not changed")
 		return nil
 	}
 	cert := tlssecret.ParseSecret(s)
@@ -205,19 +171,9 @@ func HandleSecret(s *corev1.Secret) error {
 			"store": sync.Store,
 		})
 		ll.Debugf("syncing to store %s", sync.Store)
-		rs, err := NewStore(cmtypes.StoreType(sync.Store))
+		rs, err := stores.New(sync.Store, *sync)
 		if err != nil {
 			l.WithError(err).Errorf("NewStore error")
-			metrics.SetFailure(s.Namespace, s.Name, sync.Store)
-			state.EventRecorder.Event(s, corev1.EventTypeWarning, "SyncFailed", fmt.Sprintf("Secret sync failed to store %s", sync.Store))
-			errs = append(errs, err)
-			continue
-		}
-		if err := rs.FromConfig(*sync); err != nil {
-			l.WithError(err).Errorf("FromConfig error")
-			metrics.SetFailure(s.Namespace, s.Name, sync.Store)
-			state.EventRecorder.Event(s, corev1.EventTypeWarning, "SyncFailed", fmt.Sprintf("Secret sync failed to store %s", sync.Store))
-			errs = append(errs, err)
 			continue
 		}
 		updates, err := rs.Sync(cert)

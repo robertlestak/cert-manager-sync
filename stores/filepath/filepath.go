@@ -3,11 +3,12 @@ package filepath
 import (
 	"fmt"
 	"os"
-
 	fp "path/filepath"
 
-	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
+	"github.com/robertlestak/cert-manager-sync/stores"
 )
 
 type FilepathStore struct {
@@ -17,11 +18,8 @@ type FilepathStore struct {
 	KeyFile   string
 }
 
-func (s *FilepathStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error {
-	l := log.WithFields(log.Fields{
-		"action": "FromConfig",
-	})
-	l.Debugf("FromConfig")
+func New(c tlssecret.GenericSecretSyncConfig) (stores.RemoteStore, error) {
+	s := &FilepathStore{}
 	if c.Config["dir"] != "" {
 		s.Directory = c.Config["dir"]
 	}
@@ -40,7 +38,7 @@ func (s *FilepathStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error {
 	} else {
 		s.CAFile = "ca.crt"
 	}
-	return nil
+	return s, nil
 }
 
 func (s *FilepathStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
@@ -85,4 +83,8 @@ func (s *FilepathStore) Sync(c *tlssecret.Certificate) (map[string]string, error
 	}
 	l.Info("certificate synced")
 	return nil, nil
+}
+
+func init() {
+	stores.Register("filepath", stores.StoreCreatorFunc(New))
 }
