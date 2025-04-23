@@ -1,0 +1,42 @@
+name: dockerhub push
+on: [push]
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    - run: |
+        export KUBECONFIG=/tmp/kubeconfig
+        echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $KUBECONFIG
+        echo "KUBECONFIG=$KUBECONFIG" >> $GITHUB_ENV
+    - run: |
+        BUILDER_NAME="builder-$(echo $GITHUB_RUN_ID | cut -c 1-8)"
+        echo BUILDER_NAME=$BUILDER_NAME >> $GITHUB_ENV
+        docker buildx create \
+        --bootstrap \
+        --name=$BUILDER_NAME \
+        --driver=kubernetes \
+        --platform=linux/amd64 \
+        --node=builder-amd64 \
+        --driver-opt=namespace=buildx,nodeselector="kubernetes.io/arch=amd64"
+
+        docker buildx create \
+          --append \
+          --bootstrap \
+          --name=$BUILDER_NAME \
+          --driver=kubernetes \
+          --platform=linux/arm64 \
+          --node=builder-arm64 \
+          --driver-opt=namespace=buildx,nodeselector="kubernetes.io/arch=arm64"
+    - run: |
+        echo ${{ secrets.DOCKER_HUB_PAT }} | docker login --password-stdin --username ${{ secrets.DOCKER_HUB_USERNAME }}
+        docker buildx build --builder=$BUILDER_NAME . \
+          --platform linux/amd64,linux/arm64 \
+          -t ${{ secrets.DOCKER_HUB_USERNAME }}/cert-manager-sync:latest \
+          --push --no-cache
+    - name: cleanup
+      if: always()
+      run: |
+        docker buildx rm $BUILDER_NAME
