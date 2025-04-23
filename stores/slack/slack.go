@@ -102,11 +102,13 @@ func (s *SlackStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error {
 	return nil
 }
 
-func (s *SlackStore) SendNotification(storeType, secretName, namespace, successMsg string) error {
+// SendNotification sends a notification about a sync event
+func (s *SlackStore) SendNotification(storeType, secretName, namespace, msg string, isSuccess bool) error {
 	l := log.WithFields(log.Fields{
 		"action":    "SendNotification",
 		"store":     "slack",
 		"storeType": storeType,
+		"isSuccess": isSuccess,
 	})
 	l.Debugf("Sending notification to Slack")
 	
@@ -117,10 +119,20 @@ func (s *SlackStore) SendNotification(storeType, secretName, namespace, successM
 	}
 	
 	// Build the message
+	color := "#36a64f" // Green for success
+	title := fmt.Sprintf("Certificate Sync Success: %s", secretName)
+	icon := ":lock:"
+	
+	if !isSuccess {
+		color = "#e01e5a" // Red for failure
+		title = fmt.Sprintf("Certificate Sync Failed: %s", secretName)
+		icon = ":warning:"
+	}
+	
 	attachment := SlackAttachment{
-		Color:     "#36a64f", // Green for success
-		Title:     fmt.Sprintf("Certificate Sync Success: %s", secretName),
-		Text:      successMsg,
+		Color:     color,
+		Title:     title,
+		Text:      msg,
 		Timestamp: time.Now().Unix(),
 		Fields: []SlackAttachmentField{
 			{
@@ -144,7 +156,7 @@ func (s *SlackStore) SendNotification(storeType, secretName, namespace, successM
 	
 	message := SlackMessage{
 		Username:    s.Username,
-		IconEmoji:   ":lock:",
+		IconEmoji:   icon,
 		Attachments: []SlackAttachment{attachment},
 	}
 	
@@ -174,6 +186,16 @@ func (s *SlackStore) SendNotification(storeType, secretName, namespace, successM
 	return nil
 }
 
+// NotifySuccess sends a notification about a successful sync
+func (s *SlackStore) NotifySuccess(storeType, secretName, namespace, successMsg string) error {
+	return s.SendNotification(storeType, secretName, namespace, successMsg, true)
+}
+
+// NotifyFailure sends a notification about a failed sync
+func (s *SlackStore) NotifyFailure(storeType, secretName, namespace, errorMsg string) error {
+	return s.SendNotification(storeType, secretName, namespace, errorMsg, false)
+}
+
 // Sync implements the Store interface but for the Slack store, it just returns success
 // It's meant to be used as a notification endpoint, not a certificate store
 func (s *SlackStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
@@ -189,14 +211,4 @@ func (s *SlackStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
 	// For the slack store, we don't actually sync a certificate
 	// This is just here to satisfy the Store interface
 	return nil, nil
-}
-
-// NotifySuccess sends a notification about a successful sync
-func (s *SlackStore) NotifySuccess(storeType, secretName, namespace, successMsg string) error {
-	return s.SendNotification(storeType, secretName, namespace, successMsg, true)
-}
-
-// NotifyFailure sends a notification about a failed sync
-func (s *SlackStore) NotifyFailure(storeType, secretName, namespace, errorMsg string) error {
-	return s.SendNotification(storeType, secretName, namespace, errorMsg, false)
 }
