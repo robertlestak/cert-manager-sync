@@ -18,6 +18,7 @@ const (
 	IncapsulaStoreType    StoreType = "incapsula"
 	ThreatxStoreType      StoreType = "threatx"
 	VaultStoreType        StoreType = "vault"
+	SlackStoreType        StoreType = "slack"
 )
 
 var EnabledStores = []StoreType{
@@ -30,6 +31,7 @@ var EnabledStores = []StoreType{
 	IncapsulaStoreType,
 	ThreatxStoreType,
 	VaultStoreType,
+	SlackStoreType,
 }
 
 func IsValidStoreType(storeType string) bool {

@@ -432,6 +432,69 @@ cert_manager_sync_status{namespace="cert-manager",secret="example",store="acm",s
 
 Setting `ENABLE_METRICS=false` will disable the metrics server.
 
+## Slack Notifications
+
+cert-manager-sync can send notifications to Slack when a certificate is successfully synced to a store. This is useful for monitoring certificate updates and renewals.
+
+### Enabling Slack Notifications
+
+There are two ways to configure Slack notifications:
+
+#### 1. Using Annotations on the Secret
+
+Add the following annotations to your Kubernetes TLS secret:
+
+```yaml
+cert-manager-sync.lestak.sh/slack-notify-enabled: "true"
+cert-manager-sync.lestak.sh/slack-webhook-url: "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX"
+cert-manager-sync.lestak.sh/slack-channel: "#certificate-updates"
+cert-manager-sync.lestak.sh/slack-username: "cert-manager-sync"
+```
+
+#### 2. Using a Kubernetes Secret for Webhook URL
+
+If you prefer not to expose your Slack webhook URL in annotations, you can store it in a separate Kubernetes secret:
+
+```bash
+kubectl -n cert-manager \
+    create secret generic slack-webhook-secret \
+    --from-literal webhook_url=https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX
+```
+
+Then reference this secret in your TLS secret annotations:
+
+```yaml
+cert-manager-sync.lestak.sh/slack-notify-enabled: "true"
+cert-manager-sync.lestak.sh/slack-secret-name: "slack-webhook-secret"
+cert-manager-sync.lestak.sh/slack-channel: "#certificate-updates"
+cert-manager-sync.lestak.sh/slack-username: "cert-manager-sync"
+```
+
+### Slack Messages
+
+Notifications will be sent to the configured Slack channel in the following cases:
+
+1. **Success Notifications**: When a certificate is successfully synced to a store
+   - Green colored attachment
+   - Lock emoji (:lock:)
+   - Success message with store details
+
+2. **Failure Notifications**: When a certificate sync fails
+   - Red colored attachment
+   - Warning emoji (:warning:)
+   - Error message with failure details
+
+Each notification includes:
+- Certificate name
+- Namespace
+- Store type (ACM, CloudFlare, etc.)
+- Timestamp
+- Success or error message
+
+### Multiple Notifications
+
+You can configure different notification settings for different certificates by using the appropriate annotations on each TLS secret.
+
 ### Error Logging
 
 The following log filter will display just errors syncing certificates:
@@ -445,3 +508,4 @@ The following fields are included in the sync error log message:
 ```bash
 level=error action=SyncSecretToStore namespace=cert-manager secret=example store=acm error="error message"
 ```
+

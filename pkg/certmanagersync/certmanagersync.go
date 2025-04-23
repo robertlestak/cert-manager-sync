@@ -18,6 +18,7 @@ import (
 	"github.com/robertlestak/cert-manager-sync/stores/gcpcm"
 	"github.com/robertlestak/cert-manager-sync/stores/heroku"
 	"github.com/robertlestak/cert-manager-sync/stores/incapsula"
+	"github.com/robertlestak/cert-manager-sync/stores/slack"
 	"github.com/robertlestak/cert-manager-sync/stores/threatx"
 	"github.com/robertlestak/cert-manager-sync/stores/vault"
 	log "github.com/sirupsen/logrus"
@@ -29,6 +30,12 @@ import (
 type RemoteStore interface {
 	Sync(cert *tlssecret.Certificate) (map[string]string, error)
 	FromConfig(config tlssecret.GenericSecretSyncConfig) error
+}
+
+// SlackNotifier is an interface that can be implemented by stores that support Slack notifications
+type SlackNotifier interface {
+	NotifySuccess(storeType, secretName, namespace, successMsg string) error
+	NotifyFailure(storeType, secretName, namespace, errorMsg string) error
 }
 
 func NewStore(storeType cmtypes.StoreType) (RemoteStore, error) {
@@ -56,6 +63,8 @@ func NewStore(storeType cmtypes.StoreType) (RemoteStore, error) {
 		store = &threatx.ThreatXStore{}
 	case cmtypes.VaultStoreType:
 		store = &vault.VaultStore{}
+	case cmtypes.SlackStoreType:
+		store = &slack.SlackStore{}
 	default:
 		return nil, cmtypes.ErrInvalidStoreType
 	}
@@ -177,6 +186,119 @@ func calculateNextRetryTime(secret *corev1.Secret) time.Time {
 	return nextRetryTime
 }
 
+// getSlackConfig extracts Slack configuration from annotations if present
+func getSlackConfig(s *corev1.Secret) (*slack.SlackStore, error) {
+	if s.Annotations == nil {
+		return nil, nil
+	}
+
+	// Check if Slack notifications are enabled
+	slackEnabled := s.Annotations[state.OperatorName+"/slack-notify-enabled"]
+	if slackEnabled != "true" {
+		return nil, nil
+	}
+
+	// Get the Slack configuration
+	slackConfig := &slack.SlackStore{
+		SecretNamespace: s.Namespace,
+	}
+
+	if webhookURL := s.Annotations[state.OperatorName+"/slack-webhook-url"]; webhookURL != "" {
+		slackConfig.WebhookURL = webhookURL
+	}
+
+	if secretName := s.Annotations[state.OperatorName+"/slack-secret-name"]; secretName != "" {
+		slackConfig.SecretName = secretName
+	}
+
+	if channel := s.Annotations[state.OperatorName+"/slack-channel"]; channel != "" {
+		slackConfig.ChannelName = channel
+	}
+
+	if username := s.Annotations[state.OperatorName+"/slack-username"]; username != "" {
+		slackConfig.Username = username
+	} else {
+		slackConfig.Username = "cert-manager-sync"
+	}
+
+	// If neither webhook URL nor secret name is provided, we can't send notifications
+	if slackConfig.WebhookURL == "" && slackConfig.SecretName == "" {
+		return nil, fmt.Errorf("either slack-webhook-url or slack-secret-name annotation is required for Slack notifications")
+	}
+
+	return slackConfig, nil
+}
+
+// sendSlackSuccessNotification sends a success notification to Slack if configured
+func sendSlackSuccessNotification(s *corev1.Secret, cert *tlssecret.Certificate, storeType, successMsg string) {
+	l := log.WithFields(log.Fields{
+		"action":    "sendSlackSuccessNotification",
+		"namespace": s.Namespace,
+		"name":      s.Name,
+		"storeType": storeType,
+	})
+
+	slackConfig, err := getSlackConfig(s)
+	if err != nil {
+		l.WithError(err).Warn("Failed to get Slack configuration, skipping notification")
+		return
+	}
+
+	if slackConfig == nil {
+		// Slack notifications not enabled or configured
+		return
+	}
+
+	notifier := &slack.SlackStore{
+		WebhookURL:      slackConfig.WebhookURL,
+		ChannelName:     slackConfig.ChannelName,
+		Username:        slackConfig.Username,
+		SecretName:      slackConfig.SecretName,
+		SecretNamespace: slackConfig.SecretNamespace,
+	}
+
+	if err := notifier.NotifySuccess(storeType, cert.SecretName, cert.Namespace, successMsg); err != nil {
+		l.WithError(err).Warn("Failed to send Slack success notification")
+	} else {
+		l.Debug("Slack success notification sent successfully")
+	}
+}
+
+// sendSlackFailureNotification sends a failure notification to Slack if configured
+func sendSlackFailureNotification(s *corev1.Secret, cert *tlssecret.Certificate, storeType, errorMsg string) {
+	l := log.WithFields(log.Fields{
+		"action":    "sendSlackFailureNotification",
+		"namespace": s.Namespace,
+		"name":      s.Name,
+		"storeType": storeType,
+	})
+
+	slackConfig, err := getSlackConfig(s)
+	if err != nil {
+		l.WithError(err).Warn("Failed to get Slack configuration, skipping notification")
+		return
+	}
+
+	if slackConfig == nil {
+		// Slack notifications not enabled or configured
+		return
+	}
+
+	notifier := &slack.SlackStore{
+		WebhookURL:      slackConfig.WebhookURL,
+		ChannelName:     slackConfig.ChannelName,
+		Username:        slackConfig.Username,
+		SecretName:      slackConfig.SecretName,
+		SecretNamespace: slackConfig.SecretNamespace,
+	}
+
+	if err := notifier.NotifyFailure(storeType, cert.SecretName, cert.Namespace, errorMsg); err != nil {
+		l.WithError(err).Warn("Failed to send Slack failure notification")
+	} else {
+		l.Debug("Slack failure notification sent successfully")
+	}
+}
+
 func HandleSecret(s *corev1.Secret) error {
 	l := log.WithFields(log.Fields{
 		"action":    "HandleSecret",
@@ -225,6 +347,11 @@ func HandleSecret(s *corev1.Secret) error {
 			l.WithError(err).Errorf("Sync error")
 			metrics.SetFailure(s.Namespace, s.Name, sync.Store)
 			state.EventRecorder.Event(s, corev1.EventTypeWarning, "SyncFailed", fmt.Sprintf("Secret sync failed to store %s", sync.Store))
+			
+			// Send failure notification to Slack if enabled
+			errorMsg := fmt.Sprintf("Failed to sync certificate to %s: %v", sync.Store, err)
+			sendSlackFailureNotification(s, cert, sync.Store, errorMsg)
+			
 			errs = append(errs, err)
 			continue
 		}
@@ -232,6 +359,13 @@ func HandleSecret(s *corev1.Secret) error {
 			l.WithField("updates", updates).Debug("synced with updates")
 		}
 		sync.Updates = updates
+
+		// Send success notification to Slack if enabled
+		successMsg := fmt.Sprintf("Certificate successfully synced to %s", sync.Store)
+		sendSlackSuccessNotification(s, cert, sync.Store, successMsg)
+        
+		// Set success metrics
+		metrics.SetSuccess(s.Namespace, s.Name, sync.Store)
 	}
 	patchAnnotations := make(map[string]string)
 	if s.Annotations != nil {
