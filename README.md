@@ -174,6 +174,10 @@ Annotations:
     cert-manager-sync.lestak.sh/vault-auth-method: "auth-method" # HashiCorp Vault auth method name
     cert-manager-sync.lestak.sh/vault-path: "kv-name/path/to/secret" # HashiCorp Vault path to store cert
     cert-manager-sync.lestak.sh/vault-base64-decode: "true" # base64 decode the cert before storing in Vault. Default is "false"
+    cert-manager-sync.lestak.sh/vault-pkcs12: "true" # convert the cert to PKCS#12 format before storing in Vault. Default is "false"
+    cert-manager-sync.lestak.sh/vault-pkcs12-password-secret: "secret-name" # name of the secret containing the password (if not specified, a random password will be generated and stored in Vault)
+    cert-manager-sync.lestak.sh/vault-pkcs12-password-secret-key: "password" # key in the secret containing the password (defaults to "password")
+    cert-manager-sync.lestak.sh/vault-pkcs12-password-secret-namespace: "namespace" # namespace of the secret (defaults to certificate's namespace)
 ```
 
 ### Heroku
@@ -348,6 +352,10 @@ metadata:
     cert-manager-sync.lestak.sh/vault-auth-method: "auth-method" # HashiCorp Vault auth method name
     cert-manager-sync.lestak.sh/vault-path: "kv-name/path/to/secret" # HashiCorp Vault path to store cert
     cert-manager-sync.lestak.sh/vault-base64-decode: "true" # base64 decode the cert before storing in Vault. Default is "false"
+    cert-manager-sync.lestak.sh/vault-pkcs12: "true" # convert the cert to PKCS#12 format before storing in Vault. Default is "false"
+    cert-manager-sync.lestak.sh/vault-pkcs12-password-secret: "secret-name" # name of the secret containing the password (if not specified, a random password will be generated and stored in Vault)
+    cert-manager-sync.lestak.sh/vault-pkcs12-password-secret-key: "password" # key in the secret containing the password (defaults to "password")
+    cert-manager-sync.lestak.sh/vault-pkcs12-password-secret-namespace: "namespace" # namespace of the secret (defaults to certificate's namespace)
     cert-manager-sync.lestak.sh/max-sync-attempts: "5" # limit the number of retries to 5, after which you will need to manually resolve the underlying issue and reset/remove the failed-sync-attempts annotation
     cert-manager-sync.lestak.sh/failed-sync-attempts: "0" # number of failed sync attempts, will be auto-filled by operator
     cert-manager-sync.lestak.sh/next-retry: "2022-01-01T00:00:00Z" # next retry time (RFC3339), will be auto-filled by operator. Remove this if you want to retry immediately.
@@ -444,4 +452,61 @@ The following fields are included in the sync error log message:
 
 ```bash
 level=error action=SyncSecretToStore namespace=cert-manager secret=example store=acm error="error message"
+```
+
+## PKCS#12 Support for HashiCorp Vault
+
+The Vault provider supports converting certificates to PKCS#12 format before storing them in Vault. This is useful for applications that require certificates in PKCS#12 format.
+
+### Configuration
+
+To enable PKCS#12 conversion, add the following annotation to your TLS secret:
+
+```yaml
+cert-manager-sync.lestak.sh/vault-pkcs12: "true"
+```
+
+### Password Management
+
+The PKCS#12 format requires a password. You can provide a password in two ways:
+
+1. **Using a Kubernetes Secret (Recommended)**:
+   ```yaml
+   cert-manager-sync.lestak.sh/vault-pkcs12-password-secret: "my-secret"
+   cert-manager-sync.lestak.sh/vault-pkcs12-password-secret-key: "password" # Optional, defaults to "password"
+   cert-manager-sync.lestak.sh/vault-pkcs12-password-secret-namespace: "my-namespace" # Optional, defaults to certificate's namespace
+   ```
+
+2. **Automatic Password Generation**:
+   If no password secret is specified, a random password will be generated and stored in Vault alongside the PKCS#12 file in the `pkcs12-password` field.
+
+### Storage in Vault
+
+When PKCS#12 conversion is enabled, the following data will be stored in Vault:
+
+- `tls.crt`: The original certificate in PEM format
+- `tls.key`: The original private key in PEM format
+- `ca.crt`: The CA certificate in PEM format (if provided)
+- `pkcs12`: The certificate in PKCS#12 format
+- `pkcs12-password`: The password for the PKCS#12 file (only if a random password was generated)
+
+### Example
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: example-tls
+  namespace: default
+  annotations:
+    cert-manager-sync.lestak.sh/sync-enabled: "true"
+    cert-manager-sync.lestak.sh/vault-enabled: "true"
+    cert-manager-sync.lestak.sh/vault-addr: "https://vault.example.com"
+    cert-manager-sync.lestak.sh/vault-path: "secret/data/certs/example"
+    cert-manager-sync.lestak.sh/vault-pkcs12: "true"
+    cert-manager-sync.lestak.sh/vault-pkcs12-password-secret: "my-password-secret"
+type: kubernetes.io/tls
+data:
+  tls.crt: ...
+  tls.key: ...
 ```
