@@ -98,8 +98,34 @@ func TestParseSecret(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := ParseSecret(tt.secret); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("ParseSecret() = %v, want %v", got, tt.want)
+			got := ParseSecret(tt.secret)
+
+			// Compare basic fields
+			if got.SecretName != tt.want.SecretName ||
+				got.Namespace != tt.want.Namespace ||
+				!reflect.DeepEqual(got.Ca, tt.want.Ca) ||
+				!reflect.DeepEqual(got.Certificate, tt.want.Certificate) ||
+				!reflect.DeepEqual(got.Key, tt.want.Key) {
+				t.Errorf("ParseSecret() basic fields mismatch. got = %v, want = %v", got, tt.want)
+			}
+
+			// Compare Syncs length
+			if len(got.Syncs) != len(tt.want.Syncs) {
+				t.Errorf("ParseSecret() syncs length mismatch: got %d, want %d", len(got.Syncs), len(tt.want.Syncs))
+				return
+			}
+
+			// Compare each sync config
+			for i, wantSync := range tt.want.Syncs {
+				gotSync := got.Syncs[i]
+				if gotSync.Store != wantSync.Store || gotSync.Index != wantSync.Index {
+					t.Errorf("ParseSecret() sync[%d] metadata mismatch: got %+v, want %+v", i, gotSync, wantSync)
+				}
+
+				// Compare configs
+				if !reflect.DeepEqual(gotSync.Config, wantSync.Config) {
+					t.Errorf("ParseSecret() sync[%d].Config mismatch: got %v, want %v", i, gotSync.Config, wantSync.Config)
+				}
 			}
 		})
 	}
