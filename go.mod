@@ -4,7 +4,7 @@ go 1.22.5
 
 require (
 	cloud.google.com/go/certificatemanager v1.6.0
-	github.com/aws/aws-sdk-go v1.44.13
+	github.com/aws/aws-sdk-go v1.55.7
 	github.com/cloudflare/cloudflare-go v0.83.0
 	github.com/digitalocean/godo v1.106.0
 	github.com/google/uuid v1.3.0
