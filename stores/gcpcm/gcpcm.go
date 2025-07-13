@@ -142,6 +142,7 @@ func (s *GCPStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
 		"secretNamespace": s.SecretNamespace,
 	})
 	l.Debugf("Update")
+	isNewCert := s.CertificateName == ""
 	gcert := s.certToGCPCert(c)
 	ctx := context.Background()
 	var clientOpts []option.ClientOption
@@ -163,8 +164,8 @@ func (s *GCPStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
 		"id": s.CertificateName,
 	})
 	var newKeys map[string]string
-	// if there is no secret name, this is the first time we are sending to GCP, create
-	if s.CertificateName == "" {
+	// if there is no certificate name before certToGCPCert, this is the first time we are sending to GCP, create
+	if isNewCert {
 		err = s.CreateCert(ctx, gcert)
 		if err != nil {
 			l.WithError(err).Errorf("vault.WriteSecret error")
