@@ -1,0 +1,46 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ca-certificate
+  namespace: cert-manager
+  annotations:
+    # Enable cert-manager-sync for GCP
+    cert-manager-sync.lestak.sh/sync-enabled: "true"
+    
+    # GCP Trust Store Configuration
+    cert-manager-sync.lestak.sh/gcp-enabled: "true"
+    cert-manager-sync.lestak.sh/gcp-project: "my-gcp-project"
+    cert-manager-sync.lestak.sh/gcp-location: "us-central1"
+    cert-manager-sync.lestak.sh/gcp-operation-type: "truststore"
+    cert-manager-sync.lestak.sh/gcp-certificate-type: "root"
+    cert-manager-sync.lestak.sh/gcp-trust-config-name: ""  # Will be auto-filled
+    
+    # Optional: If not using GKE workload identity
+    # cert-manager-sync.lestak.sh/gcp-secret-name: "gcp-credentials"
+type: kubernetes.io/tls
+data:
+  # Your CA certificate in PEM format (base64 encoded)
+  tls.crt: LS0tLS1CRUdJTi...  # Base64 encoded CA certificate
+  tls.key: LS0tLS1CRUdJTi...  # Base64 encoded private key (if available)
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: intermediate-ca-certificate
+  namespace: cert-manager
+  annotations:
+    # Enable cert-manager-sync for GCP
+    cert-manager-sync.lestak.sh/sync-enabled: "true"
+    
+    # GCP Trust Store Configuration for Intermediate CA
+    cert-manager-sync.lestak.sh/gcp-enabled: "true"
+    cert-manager-sync.lestak.sh/gcp-project: "my-gcp-project"
+    cert-manager-sync.lestak.sh/gcp-location: "us-central1"
+    cert-manager-sync.lestak.sh/gcp-operation-type: "truststore"
+    cert-manager-sync.lestak.sh/gcp-certificate-type: "intermediate"
+    cert-manager-sync.lestak.sh/gcp-trust-config-name: ""  # Will be auto-filled
+type: kubernetes.io/tls
+data:
+  # Your intermediate CA certificate in PEM format (base64 encoded)
+  tls.crt: LS0tLS1CRUdJTi...  # Base64 encoded intermediate CA certificate
+  tls.key: LS0tLS1CRUdJTi...  # Base64 encoded private key (if available)

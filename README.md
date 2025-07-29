@@ -151,7 +151,7 @@ kubectl -n cert-manager \
   --from-file=GOOGLE_APPLICATION_CREDENTIALS=/path/to/credentials.json
 ```
 
-Annotations:
+Annotations for regular certificates:
 
 ```yaml
     cert-manager-sync.lestak.sh/gcp-enabled: "true" # sync certificate to GCP
@@ -160,6 +160,22 @@ Annotations:
     cert-manager-sync.lestak.sh/gcp-certificate-name: "" # will be auto-filled by operator for in-place renewals
     cert-manager-sync.lestak.sh/gcp-secret-name: "" # (optional if not using GKE) secret in same namespace which contains the gcp credentials. If provided in format "namespace/secret-name", will look in that namespace for the secret
 ```
+
+#### Trust Store Support
+
+GCP Certificate Manager also supports trust stores for storing trusted CA certificates. To sync certificates to a trust store instead of as regular certificates, use these annotations:
+
+```yaml
+    cert-manager-sync.lestak.sh/gcp-enabled: "true" # sync certificate to GCP
+    cert-manager-sync.lestak.sh/gcp-location: LOCATION # GCP location to store trust config
+    cert-manager-sync.lestak.sh/gcp-project: PROJECT_ID # GCP project to store trust config
+    cert-manager-sync.lestak.sh/gcp-operation-type: "truststore" # use trust store instead of regular certificate
+    cert-manager-sync.lestak.sh/gcp-trust-config-name: "" # will be auto-filled by operator for in-place renewals
+    cert-manager-sync.lestak.sh/gcp-certificate-type: "root" # "root" for trust anchors or "intermediate" for intermediate CAs
+    cert-manager-sync.lestak.sh/gcp-secret-name: "" # (optional if not using GKE) secret in same namespace which contains the gcp credentials
+```
+
+**Note**: Trust store functionality is useful for storing CA certificates that need to be trusted by load balancers or other GCP services. The certificate will be stored as either a trust anchor (root CA) or intermediate CA based on the `certificate-type` setting.
 
 ### HashiCorp Vault
 
