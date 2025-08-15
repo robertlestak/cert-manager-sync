@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/cloudflare/cloudflare-go"
+	"github.com/cloudflare/cloudflare-go/v5"
+	"github.com/cloudflare/cloudflare-go/v5/custom_certificates"
+	"github.com/cloudflare/cloudflare-go/v5/option"
 	"github.com/robertlestak/cert-manager-sync/pkg/state"
 	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
 	log "github.com/sirupsen/logrus"
@@ -15,26 +17,21 @@ import (
 type CloudflareStore struct {
 	SecretName      string
 	SecretNamespace string
-	ApiKey          string
-	ApiEmail        string
+	ApiToken        string
 	ZoneId          string
 	CertId          string
 }
 
-func (s *CloudflareStore) GetApiKey(ctx context.Context) error {
+func (s *CloudflareStore) GetApiToken(ctx context.Context) error {
 	gopt := metav1.GetOptions{}
 	sc, err := state.KubeClient.CoreV1().Secrets(s.SecretNamespace).Get(ctx, s.SecretName, gopt)
 	if err != nil {
 		return err
 	}
-	if sc.Data["api_key"] == nil {
-		return fmt.Errorf("api_key not found in secret %s/%s", s.SecretNamespace, s.SecretName)
+	if sc.Data["api_token"] == nil {
+		return fmt.Errorf("api_token not found in secret %s/%s", s.SecretNamespace, s.SecretName)
 	}
-	if sc.Data["email"] == nil {
-		return fmt.Errorf("email not found in secret %s/%s", s.SecretNamespace, s.SecretName)
-	}
-	s.ApiKey = string(sc.Data["api_key"])
-	s.ApiEmail = string(sc.Data["email"])
+	s.ApiToken = string(sc.Data["api_token"])
 	return nil
 }
 
@@ -76,36 +73,40 @@ func (s *CloudflareStore) Sync(c *tlssecret.Certificate) (map[string]string, err
 		return nil, fmt.Errorf("secret name not found in certificate annotations")
 	}
 	ctx := context.Background()
-	if err := s.GetApiKey(ctx); err != nil {
-		l.WithError(err).Errorf("GetApiKey error")
+	if err := s.GetApiToken(ctx); err != nil {
+		l.WithError(err).Errorf("GetApiToken error")
 		return nil, err
 	}
-	client, err := cloudflare.New(s.ApiKey, s.ApiEmail)
-	if err != nil {
-		l.WithError(err).Errorf("cloudflare.New error")
-		return nil, err
-	}
-	certRequest := cloudflare.ZoneCustomSSLOptions{
-		Certificate: string(c.FullChain()),
-		PrivateKey:  string(c.Key),
-	}
+	client := cloudflare.NewClient(option.WithAPIToken(s.ApiToken))
+	
 	origCertId := s.CertId
-	var sslCert cloudflare.ZoneCustomSSL
+	var cert *custom_certificates.CustomCertificate
+	var err error
 	if s.CertId != "" {
-		sslCert, err = client.UpdateSSL(context.Background(), s.ZoneId, s.CertId, certRequest)
+		// Update existing certificate
+		cert, err = client.CustomCertificates.Edit(ctx, s.CertId, custom_certificates.CustomCertificateEditParams{
+			ZoneID:      cloudflare.F(s.ZoneId),
+			Certificate: cloudflare.F(string(c.FullChain())),
+			PrivateKey:  cloudflare.F(string(c.Key)),
+		})
 		if err != nil {
-			l.WithError(err).Errorf("cloudflare.UpdateZoneCustomSSL error")
+			l.WithError(err).Errorf("cloudflare.CustomCertificates.Edit error")
 			return nil, err
 		}
 	} else {
-		sslCert, err = client.CreateSSL(context.Background(), s.ZoneId, certRequest)
+		// Create new certificate
+		cert, err = client.CustomCertificates.New(ctx, custom_certificates.CustomCertificateNewParams{
+			ZoneID:      cloudflare.F(s.ZoneId),
+			Certificate: cloudflare.F(string(c.FullChain())),
+			PrivateKey:  cloudflare.F(string(c.Key)),
+		})
 		if err != nil {
-			l.WithError(err).Errorf("cloudflare.CreateZoneCustomSSL error")
+			l.WithError(err).Errorf("cloudflare.CustomCertificates.New error")
 			return nil, err
 		}
 	}
-	s.CertId = sslCert.ID
-	l = l.WithField("id", sslCert.ID)
+	s.CertId = cert.ID
+	l = l.WithField("id", cert.ID)
 	var newKeys map[string]string
 	if origCertId != s.CertId {
 		newKeys = map[string]string{
