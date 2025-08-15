@@ -65,8 +65,8 @@ jobs:
           TAGS=$(echo "${{ steps.meta.outputs.tags }}" | tr '\n' ',' | sed 's/,$//')
           echo "Building for tags: $TAGS"
           
-          # Build and push multi-arch images with ko
-          ko build --bare --platform=linux/amd64,linux/arm64 --tags="$TAGS" ./cmd/cert-manager-sync
+          # Build and push multi-arch images with ko (all major architectures)
+          ko build --bare --platform=linux/amd64,linux/arm64,linux/arm/v7,linux/386,linux/ppc64le,linux/s390x --tags="$TAGS" ./cmd/cert-manager-sync
 
       - name: Build image for PR (dry-run)
         if: github.event_name == 'pull_request'
