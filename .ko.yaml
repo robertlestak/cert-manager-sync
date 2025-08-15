@@ -1,0 +1,2 @@
+# ko configuration for cert-manager-sync
+defaultBaseImage: cgr.dev/chainguard/static:latest

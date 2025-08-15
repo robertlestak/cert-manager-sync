@@ -1,4 +1,4 @@
-name: Build and Push Docker Image
+name: Build and Push Container Images
 
 on:
   push:
@@ -22,13 +22,18 @@ jobs:
     permissions:
       contents: read
       packages: write
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up ko
+        uses: ko-build/setup-ko@v0.7
 
       - name: Log in to Container Registry
         if: github.event_name != 'pull_request'
@@ -51,13 +56,22 @@ jobs:
             type=semver,pattern={{major}}
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Build and push multi-arch images
+        if: github.event_name != 'pull_request'
+        env:
+          KO_DOCKER_REPO: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        run: |
+          # Convert tags to comma-separated list for ko
+          TAGS=$(echo "${{ steps.meta.outputs.tags }}" | tr '\n' ',' | sed 's/,$//')
+          echo "Building for tags: $TAGS"
+          
+          # Build and push multi-arch images with ko
+          ko build --bare --platform=linux/amd64,linux/arm64 --tags="$TAGS" ./cmd/cert-manager-sync
+
+      - name: Build image for PR (dry-run)
+        if: github.event_name == 'pull_request'
+        env:
+          KO_DOCKER_REPO: ko.local
+        run: |
+          # For PRs, build locally without pushing (amd64 only for speed)
+          ko build --platform=linux/amd64 --local ./cmd/cert-manager-sync
