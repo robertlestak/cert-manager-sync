@@ -46,7 +46,7 @@ func (s *HetznerStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error {
 		"store":  "hetznercloud",
 	})
 	l.Debugf("FromConfig")
-	
+
 	if c.Config["secret-name"] != "" {
 		s.SecretName = c.Config["secret-name"]
 	}
@@ -61,7 +61,7 @@ func (s *HetznerStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error {
 		}
 		s.CertId = certId
 	}
-	
+
 	// Parse labels if provided
 	s.Labels = make(map[string]string)
 	for k, v := range c.Config {
@@ -70,13 +70,13 @@ func (s *HetznerStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error {
 			s.Labels[labelKey] = v
 		}
 	}
-	
+
 	// if secret name is in the format of "namespace/secretname" then parse it
 	if strings.Contains(s.SecretName, "/") {
 		s.SecretNamespace = strings.Split(s.SecretName, "/")[0]
 		s.SecretName = strings.Split(s.SecretName, "/")[1]
 	}
-	
+
 	return nil
 }
 
@@ -90,11 +90,11 @@ func (s *HetznerStore) Sync(c *tlssecret.Certificate) (map[string]string, error)
 		"secretNamespace": s.SecretNamespace,
 	})
 	l.Debugf("Update")
-	
+
 	if s.SecretName == "" && s.ApiToken == "" {
 		return nil, fmt.Errorf("secret name not found in certificate annotations")
 	}
-	
+
 	ctx := context.Background()
 	// Only get API token from K8s secret if not already set (e.g., for testing)
 	if s.ApiToken == "" {
@@ -103,24 +103,24 @@ func (s *HetznerStore) Sync(c *tlssecret.Certificate) (map[string]string, error)
 			return nil, err
 		}
 	}
-	
+
 	// Create Hetzner Cloud client
 	client := hcloud.NewClient(hcloud.WithToken(s.ApiToken))
-	
+
 	// Prepare certificate name - use provided name or use secret name
 	certName := s.CertName
 	if certName == "" {
 		certName = c.SecretName
 	}
-	
+
 	// Check if we need to update an existing certificate
 	origCertId := s.CertId
-	
+
 	// If we have a cert ID, try to delete the old certificate first
 	// Hetzner Cloud doesn't support in-place updates, so we need to delete and recreate
 	if s.CertId != 0 {
 		l.WithField("id", s.CertId).Debugf("checking existing certificate")
-		
+
 		// Check if certificate exists
 		existingCert, _, err := client.Certificate.GetByID(ctx, s.CertId)
 		if err != nil {
@@ -144,7 +144,7 @@ func (s *HetznerStore) Sync(c *tlssecret.Certificate) (map[string]string, error)
 			}
 		}
 	}
-	
+
 	// Create the new certificate
 	createOpts := hcloud.CertificateCreateOpts{
 		Name:        certName,
@@ -153,17 +153,17 @@ func (s *HetznerStore) Sync(c *tlssecret.Certificate) (map[string]string, error)
 		PrivateKey:  string(c.Key),
 		Labels:      s.Labels,
 	}
-	
+
 	l.WithField("name", certName).Debugf("creating new certificate")
 	cert, _, err := client.Certificate.Create(ctx, createOpts)
 	if err != nil {
 		l.WithError(err).Errorf("failed to create certificate")
 		return nil, err
 	}
-	
+
 	l = l.WithField("id", cert.ID)
 	s.CertId = cert.ID
-	
+
 	// Prepare updates to annotations if cert ID changed
 	var newKeys map[string]string
 	if origCertId != s.CertId {
@@ -171,7 +171,7 @@ func (s *HetznerStore) Sync(c *tlssecret.Certificate) (map[string]string, error)
 			"cert-id": strconv.FormatInt(s.CertId, 10),
 		}
 	}
-	
+
 	l.Info("certificate synced")
 	return newKeys, nil
 }

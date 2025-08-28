@@ -30,12 +30,12 @@ func generateTestCertificate() (cert []byte, key []byte, error error) {
 	template := x509.Certificate{
 		SerialNumber: big.NewInt(1),
 		Subject: pkix.Name{
-			Organization: []string{"Test Org"},
-			Country:      []string{"US"},
-			Province:     []string{""},
-			Locality:     []string{""},
-			StreetAddress:[]string{""},
-			PostalCode:   []string{""},
+			Organization:  []string{"Test Org"},
+			Country:       []string{"US"},
+			Province:      []string{""},
+			Locality:      []string{""},
+			StreetAddress: []string{""},
+			PostalCode:    []string{""},
 		},
 		NotBefore:             time.Now(),
 		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
@@ -106,7 +106,7 @@ func TestIntegrationSync(t *testing.T) {
 	}
 
 	t.Logf("Successfully synced certificate with ID: %s", updates["cert-id"])
-	
+
 	// Clean up the test certificate
 	if updates["cert-id"] != "" {
 		certId, err := strconv.ParseInt(updates["cert-id"], 10, 64)
@@ -116,7 +116,7 @@ func TestIntegrationSync(t *testing.T) {
 			// Create client for cleanup
 			client := hcloud.NewClient(hcloud.WithToken(apiToken))
 			ctx := context.Background()
-			
+
 			cert, _, err := client.Certificate.GetByID(ctx, certId)
 			if err != nil {
 				t.Logf("Warning: Failed to get certificate for cleanup: %v", err)

@@ -255,7 +255,7 @@ func TestPKCS12Conversion(t *testing.T) {
 			if len(caCerts) == 0 {
 				t.Error("No CA certificates in PKCS12 data")
 			}
-			
+
 			// Verify the private key type
 			_, ok := privateKey.(*ecdsa.PrivateKey)
 			if !ok {
@@ -298,7 +298,7 @@ func TestPKCS12Conversion(t *testing.T) {
 			}
 		})
 	})
-	
+
 	// Test with RSA certificate
 	t.Run("RSA Certificate", func(t *testing.T) {
 		// Generate test certificate and key
@@ -345,7 +345,7 @@ func TestPKCS12Conversion(t *testing.T) {
 			if len(caCerts) == 0 {
 				t.Error("No CA certificates in PKCS12 data")
 			}
-			
+
 			// Verify the private key type
 			_, ok := privateKey.(*rsa.PrivateKey)
 			if !ok {
@@ -353,7 +353,7 @@ func TestPKCS12Conversion(t *testing.T) {
 			}
 		})
 	})
-	
+
 	// Test with certificate but no CA
 	t.Run("Certificate without CA", func(t *testing.T) {
 		// Generate test certificate and key
@@ -413,29 +413,29 @@ func TestFromConfig(t *testing.T) {
 				"auth-method": "kubernetes",
 			},
 			want: VaultStore{
-				Path:      "secret/data/test",
-				Addr:      "https://vault.example.com",
-				Namespace: "ns1",
-				Role:      "role1",
+				Path:       "secret/data/test",
+				Addr:       "https://vault.example.com",
+				Namespace:  "ns1",
+				Role:       "role1",
 				AuthMethod: "kubernetes",
 			},
 		},
 		{
 			name: "With base64 decode",
 			config: map[string]string{
-				"path":         "secret/data/test",
+				"path":          "secret/data/test",
 				"base64-decode": "true",
 			},
 			want: VaultStore{
-				Path:        "secret/data/test",
+				Path:         "secret/data/test",
 				Base64Decode: true,
 			},
 		},
 		{
 			name: "With PKCS12 enabled",
 			config: map[string]string{
-				"path":    "secret/data/test",
-				"pkcs12":  "true",
+				"path":   "secret/data/test",
+				"pkcs12": "true",
 			},
 			want: VaultStore{
 				Path:   "secret/data/test",
@@ -450,9 +450,9 @@ func TestFromConfig(t *testing.T) {
 				"pkcs12-password-secret": "my-secret",
 			},
 			want: VaultStore{
-				Path:             "secret/data/test",
-				PKCS12:           true,
-				PKCS12PassSecret: "my-secret",
+				Path:                "secret/data/test",
+				PKCS12:              true,
+				PKCS12PassSecret:    "my-secret",
 				PKCS12PassSecretKey: "password", // Default value
 			},
 		},
@@ -474,9 +474,9 @@ func TestFromConfig(t *testing.T) {
 		{
 			name: "With PKCS12 password secret and namespace",
 			config: map[string]string{
-				"path":                           "secret/data/test",
-				"pkcs12":                         "true",
-				"pkcs12-password-secret":         "my-secret",
+				"path":                             "secret/data/test",
+				"pkcs12":                           "true",
+				"pkcs12-password-secret":           "my-secret",
 				"pkcs12-password-secret-namespace": "my-namespace",
 			},
 			want: VaultStore{
@@ -499,52 +499,52 @@ func TestFromConfig(t *testing.T) {
 			if err != nil {
 				t.Fatalf("FromConfig() error = %v", err)
 			}
-			
+
 			// Check Path
 			if store.Path != tt.want.Path {
 				t.Errorf("Path = %v, want %v", store.Path, tt.want.Path)
 			}
-			
+
 			// Check Addr
 			if store.Addr != tt.want.Addr {
 				t.Errorf("Addr = %v, want %v", store.Addr, tt.want.Addr)
 			}
-			
+
 			// Check Namespace
 			if store.Namespace != tt.want.Namespace {
 				t.Errorf("Namespace = %v, want %v", store.Namespace, tt.want.Namespace)
 			}
-			
+
 			// Check Role
 			if store.Role != tt.want.Role {
 				t.Errorf("Role = %v, want %v", store.Role, tt.want.Role)
 			}
-			
+
 			// Check AuthMethod
 			if store.AuthMethod != tt.want.AuthMethod {
 				t.Errorf("AuthMethod = %v, want %v", store.AuthMethod, tt.want.AuthMethod)
 			}
-			
+
 			// Check Base64Decode
 			if store.Base64Decode != tt.want.Base64Decode {
 				t.Errorf("Base64Decode = %v, want %v", store.Base64Decode, tt.want.Base64Decode)
 			}
-			
+
 			// Check PKCS12
 			if store.PKCS12 != tt.want.PKCS12 {
 				t.Errorf("PKCS12 = %v, want %v", store.PKCS12, tt.want.PKCS12)
 			}
-			
+
 			// Check PKCS12PassSecret
 			if store.PKCS12PassSecret != tt.want.PKCS12PassSecret {
 				t.Errorf("PKCS12PassSecret = %v, want %v", store.PKCS12PassSecret, tt.want.PKCS12PassSecret)
 			}
-			
+
 			// Check PKCS12PassSecretKey
 			if store.PKCS12PassSecretKey != tt.want.PKCS12PassSecretKey {
 				t.Errorf("PKCS12PassSecretKey = %v, want %v", store.PKCS12PassSecretKey, tt.want.PKCS12PassSecretKey)
 			}
-			
+
 			// Check PKCS12PassSecretNamespace
 			if store.PKCS12PassSecretNamespace != tt.want.PKCS12PassSecretNamespace {
 				t.Errorf("PKCS12PassSecretNamespace = %v, want %v", store.PKCS12PassSecretNamespace, tt.want.PKCS12PassSecretNamespace)
@@ -579,11 +579,11 @@ func TestWriteSecretValue(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := writeSecretValue(tt.value, tt.asString)
 			gotType := reflect.TypeOf(got).String()
-			
+
 			if gotType != tt.wantType {
 				t.Errorf("writeSecretValue() type = %v, want %v", gotType, tt.wantType)
 			}
-			
+
 			// Check value
 			if tt.asString {
 				if got.(string) != string(tt.value) {

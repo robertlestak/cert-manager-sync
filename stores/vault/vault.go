@@ -15,8 +15,8 @@ import (
 	"github.com/robertlestak/cert-manager-sync/pkg/state"
 	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
 	log "github.com/sirupsen/logrus"
-	"software.sslmate.com/src/go-pkcs12"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"software.sslmate.com/src/go-pkcs12"
 )
 
 type VaultStore struct {
@@ -222,37 +222,37 @@ func writeSecretValue(value []byte, asString bool) any {
 // getPasswordFromSecret retrieves the PKCS#12 password from a Kubernetes secret
 func (s *VaultStore) getPasswordFromSecret(c *tlssecret.Certificate) (string, error) {
 	l := log.WithFields(log.Fields{
-		"action": "getPasswordFromSecret",
-		"secret": s.PKCS12PassSecret,
+		"action":    "getPasswordFromSecret",
+		"secret":    s.PKCS12PassSecret,
 		"namespace": s.PKCS12PassSecretNamespace,
 	})
 	l.Debug("Retrieving PKCS#12 password from secret")
-	
+
 	// If no secret is specified, return empty string
 	if s.PKCS12PassSecret == "" {
 		return "", nil
 	}
-	
+
 	// Get the secret from Kubernetes
 	secret, err := state.KubeClient.CoreV1().Secrets(s.PKCS12PassSecretNamespace).Get(
-		context.Background(), 
-		s.PKCS12PassSecret, 
+		context.Background(),
+		s.PKCS12PassSecret,
 		metav1.GetOptions{},
 	)
 	if err != nil {
 		l.WithError(err).Error("Failed to get secret containing PKCS#12 password")
 		return "", err
 	}
-	
+
 	// Get the password from the secret
 	passwordBytes, ok := secret.Data[s.PKCS12PassSecretKey]
 	if !ok {
-		err := fmt.Errorf("key %s not found in secret %s/%s", 
+		err := fmt.Errorf("key %s not found in secret %s/%s",
 			s.PKCS12PassSecretKey, s.PKCS12PassSecretNamespace, s.PKCS12PassSecret)
 		l.WithError(err).Error("Failed to get PKCS#12 password from secret")
 		return "", err
 	}
-	
+
 	return string(passwordBytes), nil
 }
 
@@ -279,10 +279,10 @@ func (s *VaultStore) convertToPKCS12WithPassword(cert []byte, key []byte, ca []b
 	if keyBlock == nil {
 		return nil, "", fmt.Errorf("failed to decode key PEM")
 	}
-	
+
 	var privateKey interface{}
 	var parseErr error
-	
+
 	// Try different key formats
 	if keyBlock.Type == "EC PRIVATE KEY" {
 		privateKey, parseErr = x509.ParseECPrivateKey(keyBlock.Bytes)
@@ -292,7 +292,7 @@ func (s *VaultStore) convertToPKCS12WithPassword(cert []byte, key []byte, ca []b
 		// Try PKCS8 as a fallback
 		privateKey, parseErr = x509.ParsePKCS8PrivateKey(keyBlock.Bytes)
 	}
-	
+
 	if parseErr != nil {
 		return nil, "", fmt.Errorf("failed to parse private key: %v", parseErr)
 	}
@@ -315,7 +315,7 @@ func (s *VaultStore) convertToPKCS12WithPassword(cert []byte, key []byte, ca []b
 			caCerts = append(caCerts, caCert)
 		}
 	}
-	
+
 	// If no password provided, generate a random one
 	if password == "" {
 		// Generate a random password
@@ -348,7 +348,7 @@ func (s *VaultStore) convertToPKCS12(cert []byte, key []byte, ca []byte, c *tlss
 		l.WithError(err).Error("Failed to get password from secret")
 		return nil, "", fmt.Errorf("failed to get password from secret: %v", err)
 	}
-	
+
 	// Convert to PKCS#12 with the password (or generate a random one if empty)
 	return s.convertToPKCS12WithPassword(cert, key, ca, password)
 }
@@ -375,13 +375,13 @@ func (s *VaultStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
 		"vaultAuthMethod": s.AuthMethod,
 		"id":              vid,
 	})
-	
+
 	// If PKCS12 is enabled and we need to use the certificate namespace for the password secret
 	if s.PKCS12 && s.PKCS12PassSecret != "" && s.PKCS12PassSecretNamespace == "" {
 		// Set the namespace to the certificate namespace
 		s.PKCS12PassSecretNamespace = c.Namespace
 	}
-	
+
 	_, cerr := s.NewClient()
 	if cerr != nil {
 		l.WithError(cerr).Errorf("vault.NewClient error")
@@ -392,16 +392,16 @@ func (s *VaultStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
 		l.WithError(err).Errorf("vault.NewToken error")
 		return nil, err
 	}
-	
+
 	cd := map[string]interface{}{}
-	
+
 	// Always store the original PEM files
 	cd["tls.crt"] = writeSecretValue(c.Certificate, s.Base64Decode)
 	cd["tls.key"] = writeSecretValue(c.Key, s.Base64Decode)
 	if len(c.Ca) > 0 {
 		cd["ca.crt"] = writeSecretValue(c.Ca, s.Base64Decode)
 	}
-	
+
 	// If PKCS#12 is enabled, convert and store the certificate in PKCS#12 format
 	if s.PKCS12 {
 		l.Debug("Converting certificate to PKCS#12 format")
@@ -410,15 +410,15 @@ func (s *VaultStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
 			l.WithError(err).Errorf("PKCS#12 conversion error")
 			return nil, err
 		}
-		
+
 		cd["pkcs12"] = writeSecretValue(pkcs12Data, s.Base64Decode)
-		
+
 		// Store the password if it was generated (not provided in secret)
 		if s.PKCS12PassSecret == "" {
 			cd["pkcs12-password"] = password
 		}
 	}
-	
+
 	_, err = s.WriteSecret(cd)
 	if err != nil {
 		l.WithError(err).Errorf("sync error")
