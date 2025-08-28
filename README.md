@@ -15,6 +15,7 @@ Enable Kubernetes `cert-manager` to sync TLS certificates to AWS ACM, GCP, Hashi
     - [Google Cloud](#google-cloud)
     - [HashiCorp Vault](#hashicorp-vault)
     - [Heroku](#heroku)
+    - [Hetzner Cloud](#hetzner-cloud)
     - [Incapsula](#incapsula)
     - [ThreatX](#threatx)
   - [Multiple Sync Destinations](#multiple-sync-destinations)
@@ -26,6 +27,11 @@ Enable Kubernetes `cert-manager` to sync TLS certificates to AWS ACM, GCP, Hashi
   - [Monitoring](#monitoring)
     - [Prometheus Metrics](#prometheus-metrics)
     - [Error Logging](#error-logging)
+  - [PKCS#12 Support for HashiCorp Vault](#pkcs12-support-for-hashicorp-vault)
+    - [Configuration](#configuration-1)
+    - [Password Management](#password-management)
+    - [Storage in Vault](#storage-in-vault)
+    - [Example](#example)
 
 ## Architecture
 
@@ -201,6 +207,48 @@ Annotations:
     cert-manager-sync.lestak.sh/heroku-cert-name: "" # will be auto-filled by operator for in-place renewals
 ```
 
+### Hetzner Cloud
+
+Create a Hetzner Cloud API Token with `Read & Write` permissions for Certificates. The token can be created in the [Hetzner Cloud Console](https://console.hetzner.cloud) under Security → API Tokens.
+
+**Project Scope**: Hetzner Cloud organizes resources into projects, and API tokens are scoped to a specific project. When you use cert-manager-sync with a Hetzner Cloud API token:
+- Certificates will be uploaded to the **same project** that issued the API token
+- You cannot cross project boundaries with a single token
+- Ensure you're using an API token from the correct project where you want the certificates to be available for your Load Balancers
+
+```bash
+kubectl -n cert-manager \
+	create secret generic example-hetzner-secret \
+	--from-literal api_token=XXXXX
+```
+
+You will then annotate your k8s TLS secret with this secret name to tell the operator to retrieve the Hetzner Cloud API secret from this location.
+
+Annotations:
+
+```yaml
+    cert-manager-sync.lestak.sh/hetznercloud-enabled: "true" # sync certificate to Hetzner Cloud
+    cert-manager-sync.lestak.sh/hetznercloud-secret-name: "example-hetzner-secret" # secret in same namespace which contains the hetzner cloud api token. If provided in format "namespace/secret-name", will look in that namespace for the secret
+    cert-manager-sync.lestak.sh/hetznercloud-cert-name: "my-cert" # unique name to give your cert in Hetzner Cloud (optional, defaults to secret name)
+    cert-manager-sync.lestak.sh/hetznercloud-cert-id: "" # will be auto-filled by operator for in-place renewals
+    cert-manager-sync.lestak.sh/hetznercloud-label-environment: "production" # (optional) add labels to the certificate in Hetzner Cloud
+    cert-manager-sync.lestak.sh/hetznercloud-label-team: "devops" # (optional) add more labels as needed
+```
+
+**Notes:**
+- Certificates can be attached to Hetzner Cloud Load Balancers for TLS termination
+- The operator will automatically handle certificate renewals by creating new certificates and removing old ones
+- If a certificate is in use by a Load Balancer, the operator will create a new certificate with a modified name instead of deleting the in-use certificate
+
+Hetzner Cloud store supports optional integration testing with a real API. To run:
+
+```bash
+export HETZNER_TEST_TOKEN="your-hetzner-api-token"
+go test ./stores/hetznercloud/... -v
+```
+
+**Note**: Use a test project token to avoid affecting production resources. The test will create and clean up test certificates in the project associated with the API token.
+
 ### Incapsula
 
 Create an Incapsula API Key and create a kube secret containing this key.
@@ -342,6 +390,10 @@ metadata:
     cert-manager-sync.lestak.sh/heroku-app: "example-app" # heroku app to attach cert
     cert-manager-sync.lestak.sh/heroku-secret-name: "example-heroku-secret" # secret in same namespace which contains heroku api key
     cert-manager-sync.lestak.sh/heroku-cert-name: "" # will be auto-filled by operator for in-place renewals
+    cert-manager-sync.lestak.sh/hetznercloud-enabled: "true" # sync certificate to Hetzner Cloud
+    cert-manager-sync.lestak.sh/hetznercloud-secret-name: "example-hetzner-secret" # secret in same namespace which contains hetzner cloud api token
+    cert-manager-sync.lestak.sh/hetznercloud-cert-name: "my-cert" # unique name to give your cert in Hetzner Cloud
+    cert-manager-sync.lestak.sh/hetznercloud-cert-id: "" # will be auto-filled by operator for in-place renewals
     cert-manager-sync.lestak.sh/incapsula-site-id: "12345" # incapsula site to attach cert
     cert-manager-sync.lestak.sh/incapsula-secret-name: "cert-manager-sync-poc" # secret in same namespace which contains incapsula api key
     cert-manager-sync.lestak.sh/threatx-hostname: "example.com" # threatx hostname to attach cert
