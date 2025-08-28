@@ -80,7 +80,7 @@ func TestIntegrationSync(t *testing.T) {
 	}
 
 	// Create store with API token
-	s := &HetznerStore{
+	s := &HetznerCloudStore{
 		ApiToken:   apiToken,
 		CertName:   fmt.Sprintf("cert-manager-sync-test-%d", time.Now().Unix()),
 		SecretName: "test-secret", // Required by Sync method even though we're not using K8s

@@ -13,7 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-type HetznerStore struct {
+type HetznerCloudStore struct {
 	SecretName      string
 	SecretNamespace string
 	ApiToken        string
@@ -22,7 +22,7 @@ type HetznerStore struct {
 	Labels          map[string]string
 }
 
-func (s *HetznerStore) GetApiToken(ctx context.Context) error {
+func (s *HetznerCloudStore) GetApiToken(ctx context.Context) error {
 	gopt := metav1.GetOptions{}
 	sc, err := state.KubeClient.CoreV1().Secrets(s.SecretNamespace).Get(ctx, s.SecretName, gopt)
 	if err != nil {
@@ -40,7 +40,7 @@ func (s *HetznerStore) GetApiToken(ctx context.Context) error {
 	return nil
 }
 
-func (s *HetznerStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error {
+func (s *HetznerCloudStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error {
 	l := log.WithFields(log.Fields{
 		"action": "FromConfig",
 		"store":  "hetznercloud",
@@ -80,7 +80,7 @@ func (s *HetznerStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error {
 	return nil
 }
 
-func (s *HetznerStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
+func (s *HetznerCloudStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
 	s.SecretNamespace = c.Namespace
 	l := log.WithFields(log.Fields{
 		"action":          "Update",

@@ -52,7 +52,7 @@ func NewStore(storeType cmtypes.StoreType) (RemoteStore, error) {
 	case cmtypes.HerokuStoreType:
 		store = &heroku.HerokuStore{}
 	case cmtypes.HetznerCloudStoreType:
-		store = &hetznercloud.HetznerStore{}
+		store = &hetznercloud.HetznerCloudStore{}
 	case cmtypes.IncapsulaStoreType:
 		store = &incapsula.IncapsulaStore{}
 	case cmtypes.ThreatxStoreType:
