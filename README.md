@@ -235,10 +235,70 @@ Annotations:
     cert-manager-sync.lestak.sh/hetznercloud-label-team: "devops" # (optional) add more labels as needed
 ```
 
-**Notes:**
-- Certificates can be attached to Hetzner Cloud Load Balancers for TLS termination
-- The operator will automatically handle certificate renewals by creating new certificates and removing old ones
-- If a certificate is in use by a Load Balancer, the operator will create a new certificate with a modified name instead of deleting the in-use certificate
+**Certificate Updates and Load Balancer Integration:**
+
+When cert-manager-sync updates a certificate in Hetzner Cloud:
+
+1. **Certificate NOT in use**: The old certificate is deleted and a new one is created with the same name. No action required.
+
+2. **Certificate in use by Load Balancer**: Since Hetzner Cloud prevents deletion of certificates that are in use:
+   - A new certificate is created with a modified name: `original-name-{old-cert-id}`
+   - The old certificate remains attached to the Load Balancer
+   - **Manual action required**: Update your Load Balancer to use the new certificate
+
+**Important for Hetzner Cloud Controller Manager users:**
+
+The Hetzner Cloud Controller Manager (for Kubernetes LoadBalancer services) identifies certificates by their exact name or ID specified in the annotation:
+```yaml
+load-balancer.hetzner.cloud/http-certificates: "my-cert-name"
+```
+
+When cert-manager-sync creates a new certificate with a modified name (due to the old one being in use), you must:
+1. Update the annotation to the new certificate name
+2. Apply the service changes to trigger the Load Balancer update
+
+**Example workflow for certificate renewal when in use:**
+1. cert-manager renews the certificate
+2. cert-manager-sync attempts to update in Hetzner Cloud
+3. If the old certificate is in use, a new one is created as `my-cert-name-12345`
+4. Update your service annotation: `load-balancer.hetzner.cloud/http-certificates: "my-cert-name-12345"`
+5. Apply the service to update the Load Balancer
+6. Once updated, the old certificate can be manually deleted from Hetzner Cloud Console
+
+**Labels Support:**
+Certificates can be labeled for organization and tracking purposes. Use annotations like:
+- `cert-manager-sync.lestak.sh/hetznercloud-label-environment: "production"`
+- `cert-manager-sync.lestak.sh/hetznercloud-label-managed-by: "cert-manager-sync"`
+
+**Automated Certificate Rotation Monitoring:**
+
+For production environments, you can automate the certificate rotation process using monitoring:
+
+1. **Use Prometheus Blackbox Exporter** to monitor SSL certificate expiry:
+   - The `probe_ssl_earliest_cert_expiry` metric provides Unix timestamp of certificate expiration
+   - Calculate days until expiry: `(probe_ssl_earliest_cert_expiry - time()) / 86400`
+
+2. **Configure cert-manager to renew certificates early** (before your monitoring alerts):
+   ```yaml
+   # In your Certificate resource
+   spec:
+     renewBefore: 720h  # 30 days - renew well before the 7-day alert
+   ```
+
+3. **Set up alerts** for certificates expiring soon (example for 7 days):
+   ```yaml
+   - alert: HetznerCertificateExpiringSoon
+     expr: (probe_ssl_earliest_cert_expiry{job="blackbox"} - time()) < 86400 * 7
+     annotations:
+       summary: "Certificate expiring soon for {{ $labels.instance }}"
+       description: "Update load-balancer.hetzner.cloud/http-certificates annotation"
+   ```
+
+4. **Automate the update process** (via CI/CD or operators):
+   - When alert triggers, the new certificate should already exist in Hetzner Cloud (thanks to early renewal)
+   - Update the Service annotation to the new certificate name: `original-name-{old-cert-id}`
+   - The Hetzner Cloud Controller Manager will switch to the new certificate on next reconciliation
+   - Old certificates can be manually deleted after the switch is confirmed
 
 Hetzner Cloud store supports optional integration testing with a real API. To run:
 
