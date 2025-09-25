@@ -1,6 +1,6 @@
 module github.com/robertlestak/cert-manager-sync
 
-go 1.24.3
+go 1.25.1
 
 require (
 	cloud.google.com/go/certificatemanager v1.9.5
