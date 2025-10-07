@@ -173,6 +173,8 @@ Annotations:
     cert-manager-sync.lestak.sh/vault-role: "role-name" # HashiCorp Vault role name
     cert-manager-sync.lestak.sh/vault-auth-method: "auth-method" # HashiCorp Vault auth method name
     cert-manager-sync.lestak.sh/vault-path: "kv-name/path/to/secret" # HashiCorp Vault path to store cert
+    cert-manager-sync.lestak.sh/vault-secret-name: "secret-name" # The name to store
+    cert-manager-sync.lestak.sh/vault-version: "kvv2" # Hashicorp Vault KV version. "kvv1" or "kvv2". Default is "kvv2"
     cert-manager-sync.lestak.sh/vault-base64-decode: "true" # base64 decode the cert before storing in Vault. Default is "false"
     cert-manager-sync.lestak.sh/vault-pkcs12: "true" # convert the cert to PKCS#12 format before storing in Vault. Default is "false"
     cert-manager-sync.lestak.sh/vault-pkcs12-password-secret: "secret-name" # name of the secret containing the password (if not specified, a random password will be generated and stored in Vault)
