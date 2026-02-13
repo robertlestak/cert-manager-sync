@@ -15,6 +15,7 @@ const (
 	FilepathStoreType     StoreType = "filepath"
 	GCPStoreType          StoreType = "gcp"
 	HerokuStoreType       StoreType = "heroku"
+	HetznerCloudStoreType StoreType = "hetznercloud"
 	IncapsulaStoreType    StoreType = "incapsula"
 	ThreatxStoreType      StoreType = "threatx"
 	VaultStoreType        StoreType = "vault"
@@ -27,6 +28,7 @@ var EnabledStores = []StoreType{
 	FilepathStoreType,
 	GCPStoreType,
 	HerokuStoreType,
+	HetznerCloudStoreType,
 	IncapsulaStoreType,
 	ThreatxStoreType,
 	VaultStoreType,

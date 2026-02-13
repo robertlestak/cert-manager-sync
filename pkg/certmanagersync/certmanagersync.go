@@ -17,6 +17,7 @@ import (
 	"github.com/robertlestak/cert-manager-sync/stores/filepath"
 	"github.com/robertlestak/cert-manager-sync/stores/gcpcm"
 	"github.com/robertlestak/cert-manager-sync/stores/heroku"
+	"github.com/robertlestak/cert-manager-sync/stores/hetznercloud"
 	"github.com/robertlestak/cert-manager-sync/stores/incapsula"
 	"github.com/robertlestak/cert-manager-sync/stores/threatx"
 	"github.com/robertlestak/cert-manager-sync/stores/vault"
@@ -50,6 +51,8 @@ func NewStore(storeType cmtypes.StoreType) (RemoteStore, error) {
 		store = &gcpcm.GCPStore{}
 	case cmtypes.HerokuStoreType:
 		store = &heroku.HerokuStore{}
+	case cmtypes.HetznerCloudStoreType:
+		store = &hetznercloud.HetznerCloudStore{}
 	case cmtypes.IncapsulaStoreType:
 		store = &incapsula.IncapsulaStore{}
 	case cmtypes.ThreatxStoreType:
