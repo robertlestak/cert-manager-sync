@@ -83,4 +83,7 @@ nodeSelector: {}
 
 tolerations: []
 
+# -- Topology spread constraints for pod distribution
+topologySpreadConstraints: []
+
 affinity: {}
