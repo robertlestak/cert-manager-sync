@@ -1,6 +1,7 @@
 package tlssecret
 
 import (
+	"sort"
 	"strconv"
 	"strings"
 
@@ -118,6 +119,14 @@ func SecretMetaToGenericSecretSyncConfig(meta map[string][]map[string]string) ([
 			}
 		}
 	}
+	// Sort configs by Store name, then by Index to ensure deterministic order
+	// Index=-1 (no suffix) comes before Index=0, 1, 2, etc.
+	sort.Slice(configs, func(i, j int) bool {
+		if configs[i].Store != configs[j].Store {
+			return configs[i].Store < configs[j].Store
+		}
+		return configs[i].Index < configs[j].Index
+	})
 	return configs, nil
 }
 
