@@ -43,6 +43,9 @@ clusterRole:
 
 podAnnotations: {}
 
+# -- Priority class name for pod scheduling
+priorityClassName: ""
+
 podSecurityContext: {}
   # fsGroup: 2000
 
