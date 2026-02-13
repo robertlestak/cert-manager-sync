@@ -99,8 +99,25 @@
         "podAnnotations": {
             "type": "object"
         },
+        "podDisruptionBudget": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "maxUnavailable": {
+                    "type": "string"
+                },
+                "minAvailable": {
+                    "type": "integer"
+                }
+            }
+        },
         "podSecurityContext": {
             "type": "object"
+        },
+        "priorityClassName": {
+            "type": "string"
         },
         "replicaCount": {
             "type": "integer"
@@ -126,6 +143,9 @@
             }
         },
         "tolerations": {
+            "type": "array"
+        },
+        "topologySpreadConstraints": {
             "type": "array"
         }
     }
