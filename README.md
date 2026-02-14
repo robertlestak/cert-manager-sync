@@ -81,21 +81,21 @@ Annotations:
 
 ### Cloudflare
 
-Create a Cloudflare API Key and create a kube secret containing this key.
+Create a Cloudflare API Token with the necessary permissions for your zone and create a kube secret containing this token.
 
 ```bash
 kubectl -n cert-manager \
 	create secret generic example-cloudflare-secret \
-	--from-literal api_key=XXXXX --from-literal email=XXXXX
+	--from-literal api_token=XXXXX
 ```
 
-You will then annotate your k8s TLS secret with this secret name to tell the operator to retrieve the Cloudflare API secret from this location.
+You will then annotate your k8s TLS secret with this secret name to tell the operator to retrieve the Cloudflare API token from this location.
 
 Annotations:
 
 ```yaml
     cert-manager-sync.lestak.sh/cloudflare-enabled: "true" # sync certificate to Cloudflare
-    cert-manager-sync.lestak.sh/cloudflare-secret-name: "example-cloudflare-secret" # secret in same namespace which contains the cloudflare api key. If provided in format "namespace/secret-name", will look in that namespace for the secret
+    cert-manager-sync.lestak.sh/cloudflare-secret-name: "example-cloudflare-secret" # secret in same namespace which contains the cloudflare api token. If provided in format "namespace/secret-name", will look in that namespace for the secret
     cert-manager-sync.lestak.sh/cloudflare-zone-id: "example-zone-id" # cloudflare zone id
     cert-manager-sync.lestak.sh/cloudflare-cert-id: "" # will be auto-filled by operator for in-place renewals
 ```
@@ -429,7 +429,7 @@ metadata:
     cert-manager-sync.lestak.sh/acm-certificate-arn: "" # will be auto-filled by operator for in-place renewals
     cert-manager-sync.lestak.sh/acm-secret-name: "" # (optional if not using IRSA) secret in same namespace which contains the aws credentials. If provided in format "namespace/secret-name", will look in that namespace for the secret
     cert-manager-sync.lestak.sh/cloudflare-enabled: "true" # sync certificate to Cloudflare
-    cert-manager-sync.lestak.sh/cloudflare-secret-name: "example-cloudflare-secret" # secret in same namespace which contains the cloudflare api key. If provided in format "namespace/secret-name", will look in that namespace for the secret
+    cert-manager-sync.lestak.sh/cloudflare-secret-name: "example-cloudflare-secret" # secret in same namespace which contains the cloudflare api token. If provided in format "namespace/secret-name", will look in that namespace for the secret
     cert-manager-sync.lestak.sh/cloudflare-zone-id: "example-zone-id" # cloudflare zone id
     cert-manager-sync.lestak.sh/cloudflare-cert-id: "" # will be auto-filled by operator for in-place renewals
     cert-manager-sync.lestak.sh/digitalocean-enabled: "true" # sync certificate to DigitalOcean
