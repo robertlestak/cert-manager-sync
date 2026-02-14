@@ -20,45 +20,73 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "version_clean=${VERSION#v}" >> $GITHUB_OUTPUT
 
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: robertlestak/cert-manager-sync
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-          labels: |
-            org.opencontainers.image.title=cert-manager-sync
-            org.opencontainers.image.description=Sync cert-manager certificates to external secret stores
-            org.opencontainers.image.url=https://github.com/robertlestak/cert-manager-sync
-            org.opencontainers.image.source=https://github.com/robertlestak/cert-manager-sync
-            org.opencontainers.image.version=${{ steps.version.outputs.version }}
-            org.opencontainers.image.revision=${{ github.sha }}
+      - name: Generate semantic version tags
+        id: semver
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          VERSION_CLEAN="${{ steps.version.outputs.version_clean }}"
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+          # Parse semver (e.g., 1.3.0)
+          if [[ $VERSION_CLEAN =~ ^([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+            MAJOR="${BASH_REMATCH[1]}"
+            MINOR="${BASH_REMATCH[2]}"
+            PATCH="${BASH_REMATCH[3]}"
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+            # Build tag list: v1.3.0, 1.3.0, 1.3, 1, latest
+            TAGS="${{ secrets.DOCKER_HUB_USERNAME }}/cert-manager-sync:${VERSION}"
+            TAGS="$TAGS,${{ secrets.DOCKER_HUB_USERNAME }}/cert-manager-sync:${VERSION_CLEAN}"
+            TAGS="$TAGS,${{ secrets.DOCKER_HUB_USERNAME }}/cert-manager-sync:${MAJOR}.${MINOR}"
+            TAGS="$TAGS,${{ secrets.DOCKER_HUB_USERNAME }}/cert-manager-sync:${MAJOR}"
+            TAGS="$TAGS,${{ secrets.DOCKER_HUB_USERNAME }}/cert-manager-sync:latest"
+          else
+            # Fallback if not semver
+            TAGS="${{ secrets.DOCKER_HUB_USERNAME }}/cert-manager-sync:${VERSION}"
+            TAGS="$TAGS,${{ secrets.DOCKER_HUB_USERNAME }}/cert-manager-sync:latest"
+          fi
+
+          echo "tags=$TAGS" >> $GITHUB_OUTPUT
+
+      - name: Setup kubeconfig
+        run: |
+          export KUBECONFIG=/tmp/kubeconfig
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $KUBECONFIG
+          echo "KUBECONFIG=$KUBECONFIG" >> $GITHUB_ENV
+
+      - name: Create buildx builder
+        run: |
+          BUILDER_NAME="builder-$(echo $GITHUB_RUN_ID | cut -c 1-8)"
+          echo BUILDER_NAME=$BUILDER_NAME >> $GITHUB_ENV
+
+          docker buildx create \
+            --bootstrap \
+            --name=$BUILDER_NAME \
+            --driver=kubernetes \
+            --platform=linux/amd64 \
+            --node=builder-amd64 \
+            --driver-opt=namespace=buildx,nodeselector="kubernetes.io/arch=amd64"
+
+          docker buildx create \
+            --append \
+            --bootstrap \
+            --name=$BUILDER_NAME \
+            --driver=kubernetes \
+            --platform=linux/arm64 \
+            --node=builder-arm64 \
+            --driver-opt=namespace=buildx,nodeselector="kubernetes.io/arch=arm64"
 
       - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login --password-stdin --username ${{ secrets.DOCKERHUB_USERNAME }}
 
       - name: Build and push
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          build-args: |
-            VERSION=${{ steps.version.outputs.version_clean }}
-            COMMIT=${{ github.sha }}
+        run: |
+          docker buildx build --builder=$BUILDER_NAME . \
+            --platform linux/amd64,linux/arm64 \
+            $(echo "${{ steps.semver.outputs.tags }}" | sed 's/,/ -t /g' | sed 's/^/-t /') \
+            --push \
+            --no-cache
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker buildx rm $BUILDER_NAME
