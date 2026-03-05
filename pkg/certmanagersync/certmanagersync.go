@@ -231,6 +231,7 @@ func HandleSecret(s *corev1.Secret) error {
 			errs = append(errs, err)
 			continue
 		}
+		metrics.SetSuccess(s.Namespace, s.Name, sync.Store)
 		if len(updates) > 0 {
 			l.WithField("updates", updates).Debug("synced with updates")
 		}
