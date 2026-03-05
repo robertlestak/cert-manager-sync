@@ -72,7 +72,7 @@ func (s *HerokuStore) Sync(c *tlssecret.Certificate) (map[string]string, error) 
 	ctx := context.Background()
 	if err := s.GetApiKey(ctx); err != nil {
 		l.WithError(err).Errorf("GetApiKey error")
-		return nil, err
+		return nil, fmt.Errorf("failed to get Heroku API key from secret %s/%s: %w", s.SecretNamespace, s.SecretName, err)
 	}
 	client := heroku.NewService(&http.Client{
 		Transport: &heroku.Transport{
@@ -88,7 +88,7 @@ func (s *HerokuStore) Sync(c *tlssecret.Certificate) (map[string]string, error) 
 		ep, err := client.SniEndpointCreate(ctx, s.AppName, sniOpts)
 		if err != nil {
 			l.WithError(err).Errorf("heroku.SniEndpointCreate error")
-			return nil, err
+			return nil, fmt.Errorf("failed to create Heroku SNI endpoint for app %s: %w", s.AppName, err)
 		}
 		l.Debugf("heroku.SniEndpointCreate success: %s", ep.Name)
 		s.CertName = ep.Name
@@ -100,7 +100,7 @@ func (s *HerokuStore) Sync(c *tlssecret.Certificate) (map[string]string, error) 
 		ep, err := client.SniEndpointUpdate(ctx, s.AppName, s.CertName, sniOpts)
 		if err != nil {
 			l.WithError(err).Errorf("heroku.SniEndpointUpdate error")
-			return nil, err
+			return nil, fmt.Errorf("failed to update Heroku SNI endpoint %s for app %s: %w", s.CertName, s.AppName, err)
 		}
 		l.Debugf("heroku.SniEndpointUpdate success: %s", ep.Name)
 		s.CertName = ep.Name

@@ -93,7 +93,7 @@ func (s *VaultStore) Login() (string, error) {
 	secret, err := s.Client.Logical().Write(path, options)
 	if err != nil {
 		l.WithError(err).Errorf("vault.Login error")
-		return "", err
+		return "", fmt.Errorf("failed to authenticate with Vault (addr: %s, role: %s, auth method: %s): %w", s.Addr, s.Role, s.AuthMethod, err)
 	}
 	s.Token = secret.Auth.ClientToken
 	l.Debugf("vault.Login success")
@@ -162,7 +162,7 @@ func (s *VaultStore) WriteSecret(sec map[string]interface{}) (map[string]interfa
 	_, err := s.Client.Logical().Write(s.Path, vd)
 	if err != nil {
 		l.WithError(err).Errorf("vault.WriteSecret error")
-		return secrets, err
+		return secrets, fmt.Errorf("failed to write certificate to Vault path %s: %w", s.Path, err)
 	}
 	return secrets, nil
 }

@@ -26,7 +26,7 @@ func (s *HetznerCloudStore) GetApiToken(ctx context.Context) error {
 	gopt := metav1.GetOptions{}
 	sc, err := state.KubeClient.CoreV1().Secrets(s.SecretNamespace).Get(ctx, s.SecretName, gopt)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get Hetzner Cloud credentials secret %s/%s: %w", s.SecretNamespace, s.SecretName, err)
 	}
 	if sc.Data["api_token"] == nil && sc.Data["token"] == nil {
 		return fmt.Errorf("api_token or token not found in secret %s/%s", s.SecretNamespace, s.SecretName)
@@ -57,7 +57,7 @@ func (s *HetznerCloudStore) FromConfig(c tlssecret.GenericSecretSyncConfig) erro
 		certId, err := strconv.ParseInt(c.Config["cert-id"], 10, 64)
 		if err != nil {
 			l.WithError(err).Errorf("failed to parse cert-id")
-			return err
+			return fmt.Errorf("failed to parse Hetzner Cloud cert-id '%s': %w", c.Config["cert-id"], err)
 		}
 		s.CertId = certId
 	}

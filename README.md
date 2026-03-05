@@ -557,14 +557,26 @@ Setting `ENABLE_METRICS=false` will disable the metrics server.
 The following log filter will display just errors syncing certificates:
 
 ```bash
-level=error action=SyncSecretToStore
+level=error action=HandleSecret
 ```
 
-The following fields are included in the sync error log message:
+Error logs now include detailed information about what failed and why:
 
 ```bash
-level=error action=SyncSecretToStore namespace=cert-manager secret=example store=acm error="error message"
+# Store initialization failure
+level=error action=HandleSecret namespace=cert-manager secret=example store=acm error="failed to initialize store acm: <error details>"
+
+# Store configuration failure
+level=error action=HandleSecret namespace=cert-manager secret=example store=acm error="failed to configure store acm: <error details>"
+
+# Sync operation failure
+level=error action=HandleSecret namespace=cert-manager secret=example store=acm error="failed to sync certificate to store acm: <error details>"
 ```
+
+Each error includes:
+- The specific operation that failed (initialization, configuration, or sync)
+- The target store name
+- The underlying error message with actionable details
 
 ## PKCS#12 Support for HashiCorp Vault
 

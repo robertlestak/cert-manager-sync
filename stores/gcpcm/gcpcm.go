@@ -30,7 +30,7 @@ func (s *GCPStore) GetApiKey(ctx context.Context) error {
 	gopt := metav1.GetOptions{}
 	sc, err := state.KubeClient.CoreV1().Secrets(s.SecretNamespace).Get(ctx, s.SecretName, gopt)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get GCP credentials secret %s/%s: %w", s.SecretNamespace, s.SecretName, err)
 	}
 	if sc.Data["GOOGLE_APPLICATION_CREDENTIALS"] == nil {
 		return fmt.Errorf("GOOGLE_APPLICATION_CREDENTIALS not found in secret %s/%s", s.SecretNamespace, s.SecretName)
@@ -95,13 +95,13 @@ func (s *GCPStore) CreateCert(ctx context.Context, gcert *certificatemanagerpb.C
 	if err != nil {
 		// TODO: Handle error.
 		l.Errorf("cannot create cert because of %s", err)
-		return err
+		return fmt.Errorf("failed to create GCP certificate in project %s, location %s: %w", s.ProjectID, s.Location, err)
 	}
 	resp, err := op.Wait(ctx)
 	if err != nil {
 		// TODO: Handle error.
 		l.Errorf("cannot complete creating cert because of %s", err)
-		return err
+		return fmt.Errorf("failed to complete GCP certificate creation (project: %s, location: %s): %w", s.ProjectID, s.Location, err)
 	}
 	l.WithField("name", resp.Name).Debugf("Cert created in GCP as %s", resp.Name)
 	s.CertificateName = resp.Name
@@ -122,12 +122,12 @@ func (s *GCPStore) UpdateCert(ctx context.Context, gcert *certificatemanagerpb.C
 	op, err := s.client.UpdateCertificate(ctx, req)
 	if err != nil {
 		l.Errorf("cannot update cert because of %s", err)
-		return err
+		return fmt.Errorf("failed to update GCP certificate %s (project: %s, location: %s): %w", s.CertificateName, s.ProjectID, s.Location, err)
 	}
 	resp, err := op.Wait(ctx)
 	if err != nil {
 		l.Errorf("cannot complete updating cert because of %s", err)
-		return err
+		return fmt.Errorf("failed to complete GCP certificate update for %s (project: %s, location: %s): %w", s.CertificateName, s.ProjectID, s.Location, err)
 	}
 	l.WithField("name", resp.Name).Debugf("Cert updated in GCP as %s", resp.Name)
 	return nil

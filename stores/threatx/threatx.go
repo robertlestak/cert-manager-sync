@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -77,7 +78,7 @@ func (s *ThreatXStore) GetAPIKey(ctx context.Context) error {
 	gopt := metav1.GetOptions{}
 	sc, err := state.KubeClient.CoreV1().Secrets(s.SecretNamespace).Get(ctx, s.SecretName, gopt)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get ThreatX credentials secret %s/%s: %w", s.SecretNamespace, s.SecretName, err)
 	}
 	s.APIToken = string(sc.Data["api_token"])
 	s.CustomerName = string(sc.Data["customer_name"])
@@ -106,29 +107,29 @@ func (s *ThreatXStore) ThreatxLogin(ctx context.Context) error {
 	jd, jerr := json.Marshal(r)
 	if jerr != nil {
 		l.Error(jerr)
-		return jerr
+		return fmt.Errorf("failed to marshal ThreatX login request: %w", jerr)
 	}
 	l.Debugf("request=%s", string(jd))
 	c := &http.Client{}
 	req, err := http.NewRequest("POST", threatxApiBase()+"/v1/login", bytes.NewBuffer(jd))
 	if err != nil {
 		l.Error(err)
-		return err
+		return fmt.Errorf("failed to create ThreatX login request: %w", err)
 	}
 	resp, err := c.Do(req)
 	if err != nil {
 		l.Error(err)
-		return err
+		return fmt.Errorf("failed to authenticate with ThreatX API: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		l.Error(err)
-		return err
+		return fmt.Errorf("ThreatX authentication failed with status %d", resp.StatusCode)
 	}
 	bd, berr := io.ReadAll(resp.Body)
 	if berr != nil {
 		l.Error(berr)
-		return berr
+		return fmt.Errorf("failed to read ThreatX login response: %w", berr)
 	}
 	l.Debugf("response=%s", string(bd))
 	type Resp struct {
@@ -141,7 +142,7 @@ func (s *ThreatXStore) ThreatxLogin(ctx context.Context) error {
 	jerr = json.Unmarshal(bd, &rr)
 	if jerr != nil {
 		l.Error(jerr)
-		return jerr
+		return fmt.Errorf("failed to parse ThreatX login response: %w", jerr)
 	}
 	s.AuthToken = rr.Ok.Token
 	l.Debugf("auth_token=%s", s.AuthToken)
@@ -243,25 +244,24 @@ func (s *ThreatXStore) UpdateSite(ctx context.Context, tx ThreatXSite) error {
 	req, err := http.NewRequest("POST", threatxApiBase()+"/v2/sites", bytes.NewBuffer(jd))
 	if err != nil {
 		l.Error(err)
-		return err
+		return fmt.Errorf("failed to create ThreatX site update request for hostname %s: %w", s.Hostname, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.Do(req)
 	if err != nil {
 		l.Error(err)
-		return err
+		return fmt.Errorf("failed to update ThreatX site for hostname %s: %w", s.Hostname, err)
 	}
 	defer resp.Body.Close()
 	bd, berr := io.ReadAll(resp.Body)
 	if berr != nil {
 		l.Error(berr)
-		return berr
+		return fmt.Errorf("failed to read ThreatX site update response for hostname %s: %w", s.Hostname, berr)
 	}
 	if resp.StatusCode != 200 {
 		l.Errorf("response=%d", resp.StatusCode)
 		l.Errorf("response_body=%s", bd)
-
-		return err
+		return fmt.Errorf("ThreatX site update failed for hostname %s (status: %d): %s", s.Hostname, resp.StatusCode, string(bd))
 	}
 	l.Debugf("response=%s", string(bd))
 	return nil

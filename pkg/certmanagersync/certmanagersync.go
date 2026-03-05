@@ -210,25 +210,25 @@ func HandleSecret(s *corev1.Secret) error {
 		ll.Debugf("syncing to store %s", sync.Store)
 		rs, err := NewStore(cmtypes.StoreType(sync.Store))
 		if err != nil {
-			l.WithError(err).Errorf("NewStore error")
+			ll.WithError(err).Errorf("failed to initialize store %s: %v", sync.Store, err)
 			metrics.SetFailure(s.Namespace, s.Name, sync.Store)
-			state.EventRecorder.Event(s, corev1.EventTypeWarning, "SyncFailed", fmt.Sprintf("Secret sync failed to store %s", sync.Store))
-			errs = append(errs, err)
+			state.EventRecorder.Event(s, corev1.EventTypeWarning, "SyncFailed", fmt.Sprintf("Failed to initialize store %s: %v", sync.Store, err))
+			errs = append(errs, fmt.Errorf("store %s initialization failed: %w", sync.Store, err))
 			continue
 		}
 		if err := rs.FromConfig(*sync); err != nil {
-			l.WithError(err).Errorf("FromConfig error")
+			ll.WithError(err).Errorf("failed to configure store %s: %v", sync.Store, err)
 			metrics.SetFailure(s.Namespace, s.Name, sync.Store)
-			state.EventRecorder.Event(s, corev1.EventTypeWarning, "SyncFailed", fmt.Sprintf("Secret sync failed to store %s", sync.Store))
-			errs = append(errs, err)
+			state.EventRecorder.Event(s, corev1.EventTypeWarning, "SyncFailed", fmt.Sprintf("Failed to configure store %s: %v", sync.Store, err))
+			errs = append(errs, fmt.Errorf("store %s configuration failed: %w", sync.Store, err))
 			continue
 		}
 		updates, err := rs.Sync(cert)
 		if err != nil {
-			l.WithError(err).Errorf("Sync error")
+			ll.WithError(err).Errorf("failed to sync certificate to store %s: %v", sync.Store, err)
 			metrics.SetFailure(s.Namespace, s.Name, sync.Store)
-			state.EventRecorder.Event(s, corev1.EventTypeWarning, "SyncFailed", fmt.Sprintf("Secret sync failed to store %s", sync.Store))
-			errs = append(errs, err)
+			state.EventRecorder.Event(s, corev1.EventTypeWarning, "SyncFailed", fmt.Sprintf("Failed to sync to store %s: %v", sync.Store, err))
+			errs = append(errs, fmt.Errorf("store %s sync failed: %w", sync.Store, err))
 			continue
 		}
 		metrics.SetSuccess(s.Namespace, s.Name, sync.Store)
@@ -282,11 +282,20 @@ func HandleSecret(s *corev1.Secret) error {
 	l.WithField("patchData", string(pd)).Debug("patchData")
 	_, err = state.KubeClient.CoreV1().Secrets(s.Namespace).Patch(context.Background(), s.Name, types.MergePatchType, pd, metav1.PatchOptions{})
 	if err != nil {
-		l.WithError(err).Errorf("Patch error")
+		l.WithError(err).Errorf("failed to patch secret annotations: %v", err)
 		return err
 	}
 	if len(errs) > 0 {
-		l.WithField("errs", errs).Errorf("errors syncing secret")
+		// Log each error individually for better visibility
+		for _, e := range errs {
+			l.WithError(e).Error("sync error details")
+		}
+		l.WithField("error_count", len(errs)).Errorf("failed to sync secret to %d store%s", len(errs), func() string {
+			if len(errs) == 1 {
+				return ""
+			}
+			return "s"
+		}())
 		state.EventRecorder.Event(s, corev1.EventTypeWarning, "SyncFailed", fmt.Sprintf("Secret sync failed to %d store%s", len(errs), func() string {
 			if len(errs) == 1 {
 				return ""

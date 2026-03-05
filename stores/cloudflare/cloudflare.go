@@ -26,7 +26,7 @@ func (s *CloudflareStore) GetApiToken(ctx context.Context) error {
 	gopt := metav1.GetOptions{}
 	sc, err := state.KubeClient.CoreV1().Secrets(s.SecretNamespace).Get(ctx, s.SecretName, gopt)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get Cloudflare credentials secret %s/%s: %w", s.SecretNamespace, s.SecretName, err)
 	}
 	if sc.Data["api_token"] == nil {
 		return fmt.Errorf("api_token not found in secret %s/%s", s.SecretNamespace, s.SecretName)
@@ -75,7 +75,7 @@ func (s *CloudflareStore) Sync(c *tlssecret.Certificate) (map[string]string, err
 	ctx := context.Background()
 	if err := s.GetApiToken(ctx); err != nil {
 		l.WithError(err).Errorf("GetApiToken error")
-		return nil, err
+		return nil, fmt.Errorf("failed to get Cloudflare API token from secret %s/%s: %w", s.SecretNamespace, s.SecretName, err)
 	}
 	client := cloudflare.NewClient(option.WithAPIToken(s.ApiToken))
 
@@ -91,7 +91,7 @@ func (s *CloudflareStore) Sync(c *tlssecret.Certificate) (map[string]string, err
 		})
 		if err != nil {
 			l.WithError(err).Errorf("cloudflare.CustomCertificates.Edit error")
-			return nil, err
+			return nil, fmt.Errorf("failed to update certificate in Cloudflare (zone: %s, cert: %s): %w", s.ZoneId, s.CertId, err)
 		}
 	} else {
 		// Create new certificate
@@ -102,7 +102,7 @@ func (s *CloudflareStore) Sync(c *tlssecret.Certificate) (map[string]string, err
 		})
 		if err != nil {
 			l.WithError(err).Errorf("cloudflare.CustomCertificates.New error")
-			return nil, err
+			return nil, fmt.Errorf("failed to create certificate in Cloudflare (zone: %s): %w", s.ZoneId, err)
 		}
 	}
 	s.CertId = cert.ID

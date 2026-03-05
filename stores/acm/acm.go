@@ -33,7 +33,7 @@ func (s *ACMStore) GetApiKey(ctx context.Context) error {
 	gopt := metav1.GetOptions{}
 	sc, err := state.KubeClient.CoreV1().Secrets(s.SecretNamespace).Get(ctx, s.SecretName, gopt)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get AWS credentials secret %s/%s: %w", s.SecretNamespace, s.SecretName, err)
 	}
 	if sc.Data["AWS_ACCESS_KEY_ID"] == nil {
 		return fmt.Errorf("AWS_ACCESS_KEY_ID not found in secret %s/%s", s.SecretNamespace, s.SecretName)
@@ -104,7 +104,7 @@ func (s *ACMStore) importCertificate(sess *session.Session, cfg *aws.Config, im 
 	cert, err := svc.ImportCertificate(im)
 	if err != nil {
 		l.Debugf("awsacm.importCertificate svc.importCertificate error: %v\n", err)
-		return err
+		return fmt.Errorf("failed to import certificate to ACM (region: %s, arn: %s): %w", s.awsRegion(), s.CertificateArn, err)
 	}
 	l.Debugf("awsacm.importCertificate svc.importCertificate success: %v\n", cert)
 	s.CertificateArn = *cert.CertificateArn

@@ -26,7 +26,7 @@ func (s *DigitalOceanStore) GetApiKey(ctx context.Context) error {
 	gopt := metav1.GetOptions{}
 	sc, err := state.KubeClient.CoreV1().Secrets(s.SecretNamespace).Get(ctx, s.SecretName, gopt)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get DigitalOcean credentials secret %s/%s: %w", s.SecretNamespace, s.SecretName, err)
 	}
 	if sc.Data["api_key"] == nil {
 		return fmt.Errorf("api_key not found in secret %s/%s", s.SecretNamespace, s.SecretName)
@@ -92,7 +92,7 @@ func (s *DigitalOceanStore) Sync(c *tlssecret.Certificate) (map[string]string, e
 	ctx := context.Background()
 	if err := s.GetApiKey(ctx); err != nil {
 		l.WithError(err).Errorf("GetApiKey error")
-		return nil, err
+		return nil, fmt.Errorf("failed to get DigitalOcean API key from secret %s/%s: %w", s.SecretNamespace, s.SecretName, err)
 	}
 	tokenSource := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: s.ApiKey})
 	oauthClient := oauth2.NewClient(context.Background(), tokenSource)
@@ -105,14 +105,14 @@ func (s *DigitalOceanStore) Sync(c *tlssecret.Certificate) (map[string]string, e
 		_, err := client.Certificates.Delete(context.Background(), s.CertId)
 		if err != nil {
 			l.WithError(err).Errorf("cannot delete certificate")
-			return nil, err
+			return nil, fmt.Errorf("failed to delete existing DigitalOcean certificate %s (id: %s): %w", s.CertName, s.CertId, err)
 		}
 		l.WithField("id", s.CertId).Debugf("certificate deleted")
 	}
 	certificate, _, err := client.Certificates.Create(context.Background(), certRequest)
 	if err != nil {
 		l.WithError(err).Errorf("cannot create certificate")
-		return nil, err
+		return nil, fmt.Errorf("failed to create DigitalOcean certificate %s: %w", s.CertName, err)
 	}
 	l = l.WithField("id", certificate.ID)
 	s.CertId = certificate.ID

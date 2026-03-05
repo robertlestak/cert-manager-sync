@@ -33,7 +33,7 @@ func (s *IncapsulaStore) GetApiKey(ctx context.Context) error {
 	}
 	sc, err := state.KubeClient.CoreV1().Secrets(s.SecretNamespace).Get(ctx, s.SecretName, gopt)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get Incapsula credentials secret %s/%s: %w", s.SecretNamespace, s.SecretName, err)
 	}
 	s.ID = string(sc.Data["api_id"])
 	s.Key = string(sc.Data["api_key"])
@@ -99,13 +99,13 @@ func (s *IncapsulaStore) UploadIncapsulaCert(cert *tlssecret.Certificate) error 
 	jd, err := json.Marshal(up)
 	if err != nil {
 		l.WithError(err).Errorf("json.Marshal error")
-		return err
+		return fmt.Errorf("failed to marshal Incapsula certificate upload request: %w", err)
 	}
 	l.Debugf("url=%s data=%s", iurl, string(jd))
 	req, rerr := http.NewRequest("PUT", iurl, strings.NewReader(string(jd)))
 	if rerr != nil {
 		l.WithError(rerr).Errorf("http.NewRequest error")
-		return rerr
+		return fmt.Errorf("failed to create Incapsula API request for site %s: %w", s.SiteID, rerr)
 	}
 	req.Header.Set("x-api-id", s.ID)
 	req.Header.Set("x-api-key", s.Key)
@@ -113,29 +113,29 @@ func (s *IncapsulaStore) UploadIncapsulaCert(cert *tlssecret.Certificate) error 
 	res, serr := c.Do(req)
 	if serr != nil {
 		l.WithError(serr).Errorf("c.Do error=%v", serr)
-		return serr
+		return fmt.Errorf("failed to upload certificate to Incapsula site %s: %w", s.SiteID, serr)
 	}
 	defer res.Body.Close()
 	bd, berr := io.ReadAll(res.Body)
 	if berr != nil {
 		l.WithError(berr).Errorf("io.ReadAll error")
-		return berr
+		return fmt.Errorf("failed to read Incapsula API response for site %s: %w", s.SiteID, berr)
 	}
 	if res.StatusCode != 200 {
 		l.Debugf("status=%v body=%s", res.StatusCode, string(bd))
-		return fmt.Errorf("incapsula upload failed, incapsulaSecretNamespace=%s incapsulaSecret=%s statusCode=%d", s.SecretNamespace, s.SecretName, res.StatusCode)
+		return fmt.Errorf("incapsula upload failed for site %s (status: %d, secret: %s/%s): %s", s.SiteID, res.StatusCode, s.SecretNamespace, s.SecretName, string(bd))
 	}
 	ir := &IncapsulaResponse{}
 	if err = json.Unmarshal(bd, ir); err != nil {
 		l.WithError(err).Errorf("json.Unmarshal error")
 		// debug dump the response
 		l.Debugf("status=%v body=%s", res.StatusCode, string(bd))
-		return err
+		return fmt.Errorf("failed to parse Incapsula API response for site %s: %w", s.SiteID, err)
 	}
 	l.Debugf("incapsula statusCode=%d response=%v", res.StatusCode, string(bd))
 	if ir.Res != 0 {
 		l.Debugf("status=%v body=%s", res.StatusCode, string(bd))
-		return fmt.Errorf("incapsula upload failed, incapsulaSecretNamespace=%s incapsulaSecret=%s body=%s", s.SecretNamespace, s.SecretName, string(bd))
+		return fmt.Errorf("incapsula upload failed for site %s (secret: %s/%s): %s", s.SiteID, s.SecretNamespace, s.SecretName, string(bd))
 	}
 	l.Debugf("incapsula response=%v", string(bd))
 	return err
