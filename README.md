@@ -502,7 +502,24 @@ spec:
 
 ## Deployment
 
-Deploy the operator:
+### Using Helm Repository (Recommended)
+
+Add the Helm repository:
+
+```bash
+helm repo add cert-manager-sync https://robertlestak.github.io/cert-manager-sync
+helm repo update
+```
+
+Install the operator:
+
+```bash
+helm install cert-manager-sync cert-manager-sync/cert-manager-sync -n cert-manager --create-namespace
+```
+
+### Using Local Chart
+
+Deploy the operator from source:
 
 ```bash
 helm upgrade --install -n cert-manager cert-manager-sync ./deploy/cert-manager-sync
