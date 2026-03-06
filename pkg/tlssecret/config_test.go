@@ -32,8 +32,16 @@ func secretStoresMetaEqual(m1, m2 map[string][]map[string]string) bool {
 		if len(v1) != len(v2) {
 			return false
 		}
-		for i := range v1 {
-			if !mapsEqual(v1[i], v2[i]) {
+		// Check that all maps in v1 exist in v2 (order-independent)
+		for _, m1Map := range v1 {
+			found := false
+			for _, m2Map := range v2 {
+				if mapsEqual(m1Map, m2Map) {
+					found = true
+					break
+				}
+			}
+			if !found {
 				return false
 			}
 		}
@@ -77,6 +85,32 @@ func TestGetSecretStoresMeta(t *testing.T) {
 				},
 				"gcp": {
 					{"key1": "value3"},
+				},
+			},
+		},
+		{
+			name: "Test with imperva annotations",
+			annotations: map[string]string{
+				state.OperatorName + "/imperva-site-id":     "12345",
+				state.OperatorName + "/imperva-secret-name": "my-secret",
+			},
+			want: map[string][]map[string]string{
+				"imperva": {
+					{"site-id": "12345"},
+					{"secret-name": "my-secret"},
+				},
+			},
+		},
+		{
+			name: "Test with incapsula annotations (backwards compatibility)",
+			annotations: map[string]string{
+				state.OperatorName + "/incapsula-site-id":     "67890",
+				state.OperatorName + "/incapsula-secret-name": "old-secret",
+			},
+			want: map[string][]map[string]string{
+				"incapsula": {
+					{"site-id": "67890"},
+					{"secret-name": "old-secret"},
 				},
 			},
 		},

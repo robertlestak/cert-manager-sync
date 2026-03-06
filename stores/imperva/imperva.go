@@ -1,4 +1,4 @@
-package incapsula
+package imperva
 
 import (
 	"cmp"
@@ -17,7 +17,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-type IncapsulaStore struct {
+type ImpervaStore struct {
 	ID              string `json:"api_id"`
 	SiteID          string `json:"site_id"`
 	Key             string `json:"api_key"`
@@ -26,21 +26,21 @@ type IncapsulaStore struct {
 	SecretNamespace string
 }
 
-func (s *IncapsulaStore) GetApiKey(ctx context.Context) error {
+func (s *ImpervaStore) GetApiKey(ctx context.Context) error {
 	gopt := metav1.GetOptions{}
 	if s.SecretName == "" {
 		return fmt.Errorf("secret name not set")
 	}
 	sc, err := state.KubeClient.CoreV1().Secrets(s.SecretNamespace).Get(ctx, s.SecretName, gopt)
 	if err != nil {
-		return fmt.Errorf("failed to get Incapsula credentials secret %s/%s: %w", s.SecretNamespace, s.SecretName, err)
+		return fmt.Errorf("failed to get Imperva credentials secret %s/%s: %w", s.SecretNamespace, s.SecretName, err)
 	}
 	s.ID = string(sc.Data["api_id"])
 	s.Key = string(sc.Data["api_key"])
 	return nil
 }
 
-func (s *IncapsulaStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error {
+func (s *ImpervaStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error {
 	l := log.WithFields(log.Fields{
 		"action": "FromConfig",
 	})
@@ -64,8 +64,8 @@ func (s *IncapsulaStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error {
 	return nil
 }
 
-// Incapsula response contains the response from Incapsula API
-type IncapsulaResponse struct {
+// ImpervaResponse contains the response from Imperva API
+type ImpervaResponse struct {
 	Res        int    `json:"res"`
 	ResMessage string `json:"res_message"`
 }
@@ -77,15 +77,15 @@ type ImpervaCertUpload struct {
 	AuthType    string `json:"auth_type"`
 }
 
-// UploadIncapsulaCert syncs a certificate with Incapsula site
-func (s *IncapsulaStore) UploadIncapsulaCert(cert *tlssecret.Certificate) error {
+// UploadImpervaCert syncs a certificate with Imperva site
+func (s *ImpervaStore) UploadImpervaCert(cert *tlssecret.Certificate) error {
 	l := log.WithFields(
 		log.Fields{
-			"action": "UploadIncapsulaCert",
+			"action": "UploadImpervaCert",
 			"siteID": s.SiteID,
 		},
 	)
-	l.Debugf("UploadIncapsulaCert")
+	l.Debugf("UploadImpervaCert")
 	var err error
 	bCert := base64.StdEncoding.EncodeToString(cert.FullChain())
 	bKey := base64.StdEncoding.EncodeToString(cert.Key)
@@ -99,13 +99,13 @@ func (s *IncapsulaStore) UploadIncapsulaCert(cert *tlssecret.Certificate) error 
 	jd, err := json.Marshal(up)
 	if err != nil {
 		l.WithError(err).Errorf("json.Marshal error")
-		return fmt.Errorf("failed to marshal Incapsula certificate upload request: %w", err)
+		return fmt.Errorf("failed to marshal Imperva certificate upload request: %w", err)
 	}
 	l.Debugf("url=%s data=%s", iurl, string(jd))
 	req, rerr := http.NewRequest("PUT", iurl, strings.NewReader(string(jd)))
 	if rerr != nil {
 		l.WithError(rerr).Errorf("http.NewRequest error")
-		return fmt.Errorf("failed to create Incapsula API request for site %s: %w", s.SiteID, rerr)
+		return fmt.Errorf("failed to create Imperva API request for site %s: %w", s.SiteID, rerr)
 	}
 	req.Header.Set("x-api-id", s.ID)
 	req.Header.Set("x-api-key", s.Key)
@@ -113,42 +113,42 @@ func (s *IncapsulaStore) UploadIncapsulaCert(cert *tlssecret.Certificate) error 
 	res, serr := c.Do(req)
 	if serr != nil {
 		l.WithError(serr).Errorf("c.Do error=%v", serr)
-		return fmt.Errorf("failed to upload certificate to Incapsula site %s: %w", s.SiteID, serr)
+		return fmt.Errorf("failed to upload certificate to Imperva site %s: %w", s.SiteID, serr)
 	}
 	defer res.Body.Close()
 	bd, berr := io.ReadAll(res.Body)
 	if berr != nil {
 		l.WithError(berr).Errorf("io.ReadAll error")
-		return fmt.Errorf("failed to read Incapsula API response for site %s: %w", s.SiteID, berr)
+		return fmt.Errorf("failed to read Imperva API response for site %s: %w", s.SiteID, berr)
 	}
 	if res.StatusCode != 200 {
 		l.Debugf("status=%v body=%s", res.StatusCode, string(bd))
-		return fmt.Errorf("incapsula upload failed for site %s (status: %d, secret: %s/%s): %s", s.SiteID, res.StatusCode, s.SecretNamespace, s.SecretName, string(bd))
+		return fmt.Errorf("imperva upload failed for site %s (status: %d, secret: %s/%s): %s", s.SiteID, res.StatusCode, s.SecretNamespace, s.SecretName, string(bd))
 	}
-	ir := &IncapsulaResponse{}
+	ir := &ImpervaResponse{}
 	if err = json.Unmarshal(bd, ir); err != nil {
 		l.WithError(err).Errorf("json.Unmarshal error")
 		// debug dump the response
 		l.Debugf("status=%v body=%s", res.StatusCode, string(bd))
-		return fmt.Errorf("failed to parse Incapsula API response for site %s: %w", s.SiteID, err)
+		return fmt.Errorf("failed to parse Imperva API response for site %s: %w", s.SiteID, err)
 	}
-	l.Debugf("incapsula statusCode=%d response=%v", res.StatusCode, string(bd))
+	l.Debugf("imperva statusCode=%d response=%v", res.StatusCode, string(bd))
 	if ir.Res != 0 {
 		l.Debugf("status=%v body=%s", res.StatusCode, string(bd))
-		return fmt.Errorf("incapsula upload failed for site %s (secret: %s/%s): %s", s.SiteID, s.SecretNamespace, s.SecretName, string(bd))
+		return fmt.Errorf("imperva upload failed for site %s (secret: %s/%s): %s", s.SiteID, s.SecretNamespace, s.SecretName, string(bd))
 	}
-	l.Debugf("incapsula response=%v", string(bd))
+	l.Debugf("imperva response=%v", string(bd))
 	return err
 }
 
-func (s *IncapsulaStore) GetIncapsulaSiteStatus() (string, error) {
+func (s *ImpervaStore) GetImpervaSiteStatus() (string, error) {
 	l := log.WithFields(
 		log.Fields{
-			"action": "GetIncapsulaSiteStatus",
+			"action": "GetImpervaSiteStatus",
 			"siteID": s.SiteID,
 		},
 	)
-	l.Debugf("GetIncapsulaSiteStatus")
+	l.Debugf("GetImpervaSiteStatus")
 	var err error
 	iurl := "https://my.imperva.com/api/prov/v1/sites/status"
 	c := http.Client{}
@@ -176,25 +176,25 @@ func (s *IncapsulaStore) GetIncapsulaSiteStatus() (string, error) {
 		l.WithError(berr).Errorf("ioutil.ReadAll error")
 		return "", berr
 	}
-	ir := &IncapsulaResponse{}
+	ir := &ImpervaResponse{}
 	if err = json.Unmarshal(bd, ir); err != nil {
 		l.WithError(err).Errorf("json.Unmarshal error")
 		return string(bd), err
 	}
-	l.Debugf("incapsula statusCode=%d response=%v", res.StatusCode, string(bd))
+	l.Debugf("imperva statusCode=%d response=%v", res.StatusCode, string(bd))
 	if ir.Res != 0 {
 		l.Debugf("status=%v body=%s", res.StatusCode, string(bd))
-		return string(bd), fmt.Errorf("incapsula upload failed, body=%s", string(bd))
+		return string(bd), fmt.Errorf("imperva upload failed, body=%s", string(bd))
 	}
-	l.Debugf("incapsula response=%v", string(bd))
+	l.Debugf("imperva response=%v", string(bd))
 	return string(bd), err
 }
 
-func (s *IncapsulaStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
+func (s *ImpervaStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
 	s.SecretNamespace = c.Namespace
 	l := log.WithFields(log.Fields{
 		"action":          "Sync",
-		"store":           "incapsula",
+		"store":           "imperva",
 		"secretName":      s.SecretName,
 		"secretNamespace": s.SecretNamespace,
 		"siteID":          s.SiteID,
@@ -205,18 +205,18 @@ func (s *IncapsulaStore) Sync(c *tlssecret.Certificate) (map[string]string, erro
 	})
 	ctx := context.Background()
 	if err := s.GetApiKey(ctx); err != nil {
-		l.WithError(err).Errorf("incapsula.GetApiKey error")
+		l.WithError(err).Errorf("imperva.GetApiKey error")
 		l.WithError(err).Errorf("sync error")
 		return nil, err
 	}
-	bd, err := s.GetIncapsulaSiteStatus()
+	bd, err := s.GetImpervaSiteStatus()
 	if err != nil {
-		l.WithError(err).Errorf("incapsula.GetIncapsulaSiteStatus error: %s", bd)
+		l.WithError(err).Errorf("imperva.GetImpervaSiteStatus error: %s", bd)
 		l.WithError(err).Errorf("sync error")
 		return nil, err
 	}
-	if err := s.UploadIncapsulaCert(c); err != nil {
-		l.WithError(err).Errorf("incapsula.UploadIncapsulaCert error")
+	if err := s.UploadImpervaCert(c); err != nil {
+		l.WithError(err).Errorf("imperva.UploadImpervaCert error")
 		l.WithError(err).Errorf("sync error")
 		return nil, err
 	}

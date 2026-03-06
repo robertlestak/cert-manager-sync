@@ -16,7 +16,8 @@ const (
 	GCPStoreType          StoreType = "gcp"
 	HerokuStoreType       StoreType = "heroku"
 	HetznerCloudStoreType StoreType = "hetznercloud"
-	IncapsulaStoreType    StoreType = "incapsula"
+	ImpervaStoreType      StoreType = "imperva"
+	IncapsulaStoreType    StoreType = "incapsula" // Deprecated: Use ImpervaStoreType
 	ThreatxStoreType      StoreType = "threatx"
 	VaultStoreType        StoreType = "vault"
 )
@@ -29,7 +30,8 @@ var EnabledStores = []StoreType{
 	GCPStoreType,
 	HerokuStoreType,
 	HetznerCloudStoreType,
-	IncapsulaStoreType,
+	ImpervaStoreType,
+	IncapsulaStoreType, // Backwards compatibility
 	ThreatxStoreType,
 	VaultStoreType,
 }

@@ -55,6 +55,11 @@ func TestNewStore(t *testing.T) {
 			wantErr:   false,
 		},
 		{
+			name:      "Test ImpervaStoreType",
+			storeType: cmtypes.ImpervaStoreType,
+			wantErr:   false,
+		},
+		{
 			name:      "Test ThreatxStoreType",
 			storeType: cmtypes.ThreatxStoreType,
 			wantErr:   false,

@@ -18,7 +18,7 @@ import (
 	"github.com/robertlestak/cert-manager-sync/stores/gcpcm"
 	"github.com/robertlestak/cert-manager-sync/stores/heroku"
 	"github.com/robertlestak/cert-manager-sync/stores/hetznercloud"
-	"github.com/robertlestak/cert-manager-sync/stores/incapsula"
+	"github.com/robertlestak/cert-manager-sync/stores/imperva"
 	"github.com/robertlestak/cert-manager-sync/stores/threatx"
 	"github.com/robertlestak/cert-manager-sync/stores/vault"
 	log "github.com/sirupsen/logrus"
@@ -53,8 +53,8 @@ func NewStore(storeType cmtypes.StoreType) (RemoteStore, error) {
 		store = &heroku.HerokuStore{}
 	case cmtypes.HetznerCloudStoreType:
 		store = &hetznercloud.HetznerCloudStore{}
-	case cmtypes.IncapsulaStoreType:
-		store = &incapsula.IncapsulaStore{}
+	case cmtypes.ImpervaStoreType, cmtypes.IncapsulaStoreType:
+		store = &imperva.ImpervaStore{}
 	case cmtypes.ThreatxStoreType:
 		store = &threatx.ThreatXStore{}
 	case cmtypes.VaultStoreType:
