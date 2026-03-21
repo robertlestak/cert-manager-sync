@@ -1,0 +1,168 @@
+<svg width="680" height="620" viewBox="0 0 680 620" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    @media (prefers-color-scheme: light) {
+      .bg-cluster { fill: #EEEDFE; stroke: #534AB7; }
+      .bg-teal { fill: #E1F5EE; stroke: #0F6E56; }
+      .bg-amber { fill: #FAEEDA; stroke: #854F0B; }
+      .bg-coral { fill: #FAECE7; stroke: #993C1D; }
+      .bg-blue { fill: #E6F1FB; stroke: #185FA5; }
+      .bg-gray { fill: #F1EFE8; stroke: #5F5E5A; }
+      .text-primary { fill: #2C2C2A; }
+      .text-secondary { fill: #5F5E5A; }
+      .text-teal { fill: #085041; }
+      .text-amber { fill: #633806; }
+      .text-coral { fill: #712B13; }
+      .text-blue { fill: #0C447C; }
+      .text-gray { fill: #444441; }
+      .text-purple { fill: #3C3489; }
+      .stroke-coral { stroke: #D85A30; }
+      .stroke-light { stroke: #B4B2A9; }
+    }
+    @media (prefers-color-scheme: dark) {
+      .bg-cluster { fill: #26215C; stroke: #AFA9EC; }
+      .bg-teal { fill: #085041; stroke: #5DCAA5; }
+      .bg-amber { fill: #633806; stroke: #FAC775; }
+      .bg-coral { fill: #712B13; stroke: #F0997B; }
+      .bg-blue { fill: #0C447C; stroke: #85B7EB; }
+      .bg-gray { fill: #444441; stroke: #B4B2A9; }
+      .text-primary { fill: #F1EFE8; }
+      .text-secondary { fill: #B4B2A9; }
+      .text-teal { fill: #9FE1CB; }
+      .text-amber { fill: #FAC775; }
+      .text-coral { fill: #F5C4B3; }
+      .text-blue { fill: #B5D4F4; }
+      .text-gray { fill: #D3D1C7; }
+      .text-purple { fill: #CECBF6; }
+      .stroke-coral { stroke: #F0997B; }
+      .stroke-light { stroke: #5F5E5A; }
+    }
+    .title { font-family: system-ui, -apple-system, sans-serif; font-size: 16px; font-weight: 500; }
+    .subtitle { font-family: system-ui, -apple-system, sans-serif; font-size: 12px; }
+    .heading { font-family: system-ui, -apple-system, sans-serif; font-size: 14px; font-weight: 500; }
+    .label { font-family: system-ui, -apple-system, sans-serif; font-size: 12px; }
+  </style>
+  
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <marker id="arrow-coral" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="#D85A30" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text class="title text-primary" x="340" y="30" text-anchor="middle">cert-manager-sync operator</text>
+  <text class="subtitle text-secondary" x="340" y="48" text-anchor="middle">Kubernetes TLS certificate synchronization</text>
+
+  <!-- Kubernetes Cluster Container -->
+  <rect class="bg-cluster" x="40" y="70" width="600" height="240" rx="16" stroke-width="0.5" fill-opacity="0.15"/>
+  <text class="heading text-purple" x="60" y="94">Kubernetes cluster</text>
+
+  <!-- cert-manager -->
+  <rect class="bg-teal" x="60" y="115" width="160" height="56" rx="8" stroke-width="0.5"/>
+  <text class="heading text-teal" x="140" y="137" text-anchor="middle" dominant-baseline="central">cert-manager</text>
+  <text class="subtitle text-teal" x="140" y="157" text-anchor="middle" dominant-baseline="central">Issues certificates</text>
+
+  <!-- TLS Secret -->
+  <rect class="bg-amber" x="260" y="115" width="160" height="56" rx="8" stroke-width="0.5"/>
+  <text class="heading text-amber" x="340" y="137" text-anchor="middle" dominant-baseline="central">TLS secret</text>
+  <text class="subtitle text-amber" x="340" y="157" text-anchor="middle" dominant-baseline="central">With sync annotations</text>
+
+  <!-- cert-manager-sync operator -->
+  <rect class="bg-coral" x="460" y="115" width="160" height="56" rx="8" stroke-width="0.5"/>
+  <text class="heading text-coral" x="540" y="137" text-anchor="middle" dominant-baseline="central">cert-manager-sync</text>
+  <text class="subtitle text-coral" x="540" y="157" text-anchor="middle" dominant-baseline="central">Watches secrets</text>
+
+  <!-- Credential Secrets -->
+  <rect class="bg-gray" x="260" y="220" width="160" height="56" rx="8" stroke-width="0.5"/>
+  <text class="heading text-gray" x="340" y="242" text-anchor="middle" dominant-baseline="central">Credential secrets</text>
+  <text class="subtitle text-gray" x="340" y="262" text-anchor="middle" dominant-baseline="central">API keys, tokens</text>
+
+  <!-- Arrows within cluster -->
+  <line x1="220" y1="143" x2="258" y2="143" class="stroke-light" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text class="label text-secondary" x="239" y="133">creates</text>
+
+  <line x1="420" y1="143" x2="458" y2="143" class="stroke-light" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text class="label text-secondary" x="439" y="133">watches</text>
+
+  <line x1="340" y1="171" x2="340" y2="218" class="stroke-light" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text class="label text-secondary" x="352" y="198">refs</text>
+
+  <path d="M420 248 L540 248 L540 171" fill="none" class="stroke-light" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text class="label text-secondary" x="480" y="238">reads</text>
+
+  <!-- External Stores Section -->
+  <text class="heading text-primary" x="340" y="345" text-anchor="middle">External certificate stores</text>
+
+  <!-- Store boxes - Row 1 -->
+  <rect class="bg-blue" x="40" y="365" width="130" height="50" rx="8" stroke-width="0.5"/>
+  <text class="heading text-blue" x="105" y="385" text-anchor="middle" dominant-baseline="central">AWS ACM</text>
+  <text class="subtitle text-blue" x="105" y="403" text-anchor="middle" dominant-baseline="central">CloudFront, ALB</text>
+
+  <rect class="bg-blue" x="185" y="365" width="130" height="50" rx="8" stroke-width="0.5"/>
+  <text class="heading text-blue" x="250" y="385" text-anchor="middle" dominant-baseline="central">GCP</text>
+  <text class="subtitle text-blue" x="250" y="403" text-anchor="middle" dominant-baseline="central">Certificate Manager</text>
+
+  <rect class="bg-blue" x="330" y="365" width="130" height="50" rx="8" stroke-width="0.5"/>
+  <text class="heading text-blue" x="395" y="385" text-anchor="middle" dominant-baseline="central">Vault</text>
+  <text class="subtitle text-blue" x="395" y="403" text-anchor="middle" dominant-baseline="central">KV secrets</text>
+
+  <rect class="bg-blue" x="475" y="365" width="130" height="50" rx="8" stroke-width="0.5"/>
+  <text class="heading text-blue" x="540" y="385" text-anchor="middle" dominant-baseline="central">Cloudflare</text>
+  <text class="subtitle text-blue" x="540" y="403" text-anchor="middle" dominant-baseline="central">Edge certificates</text>
+
+  <!-- Store boxes - Row 2 -->
+  <rect class="bg-blue" x="40" y="430" width="130" height="50" rx="8" stroke-width="0.5"/>
+  <text class="heading text-blue" x="105" y="450" text-anchor="middle" dominant-baseline="central">Incapsula</text>
+  <text class="subtitle text-blue" x="105" y="468" text-anchor="middle" dominant-baseline="central">WAF sites</text>
+
+  <rect class="bg-blue" x="185" y="430" width="130" height="50" rx="8" stroke-width="0.5"/>
+  <text class="heading text-blue" x="250" y="450" text-anchor="middle" dominant-baseline="central">Heroku</text>
+  <text class="subtitle text-blue" x="250" y="468" text-anchor="middle" dominant-baseline="central">App endpoints</text>
+
+  <rect class="bg-blue" x="330" y="430" width="130" height="50" rx="8" stroke-width="0.5"/>
+  <text class="heading text-blue" x="395" y="450" text-anchor="middle" dominant-baseline="central">DigitalOcean</text>
+  <text class="subtitle text-blue" x="395" y="468" text-anchor="middle" dominant-baseline="central">Load balancers</text>
+
+  <rect class="bg-blue" x="475" y="430" width="130" height="50" rx="8" stroke-width="0.5"/>
+  <text class="heading text-blue" x="540" y="450" text-anchor="middle" dominant-baseline="central">ThreatX</text>
+  <text class="subtitle text-blue" x="540" y="468" text-anchor="middle" dominant-baseline="central">WAF hostnames</text>
+
+  <!-- Filepath Store -->
+  <rect class="bg-gray" x="260" y="495" width="160" height="50" rx="8" stroke-width="0.5"/>
+  <text class="heading text-gray" x="340" y="515" text-anchor="middle" dominant-baseline="central">Filepath</text>
+  <text class="subtitle text-gray" x="340" y="533" text-anchor="middle" dominant-baseline="central">Mounted volumes</text>
+
+  <!-- Sync arrows from operator to stores -->
+  <path d="M540 171 L540 290 L105 290 L105 363" fill="none" stroke="#D85A30" stroke-width="1.5" marker-end="url(#arrow-coral)"/>
+  <path d="M540 290 L250 290 L250 363" fill="none" stroke="#D85A30" stroke-width="1.5" marker-end="url(#arrow-coral)"/>
+  <path d="M540 290 L395 290 L395 363" fill="none" stroke="#D85A30" stroke-width="1.5" marker-end="url(#arrow-coral)"/>
+  <path d="M540 290 L540 363" fill="none" stroke="#D85A30" stroke-width="1.5" marker-end="url(#arrow-coral)"/>
+
+  <line x1="105" y1="415" x2="105" y2="428" stroke="#D85A30" stroke-width="1.5" marker-end="url(#arrow-coral)"/>
+  <line x1="250" y1="415" x2="250" y2="428" stroke="#D85A30" stroke-width="1.5" marker-end="url(#arrow-coral)"/>
+  <line x1="395" y1="415" x2="395" y2="428" stroke="#D85A30" stroke-width="1.5" marker-end="url(#arrow-coral)"/>
+  <line x1="540" y1="415" x2="540" y2="428" stroke="#D85A30" stroke-width="1.5" marker-end="url(#arrow-coral)"/>
+  
+  <path d="M540 290 L340 290 L340 493" fill="none" stroke="#D85A30" stroke-width="1.5" marker-end="url(#arrow-coral)"/>
+
+  <!-- Sync label -->
+  <text class="label" x="560" y="285" fill="#D85A30">syncs certs</text>
+
+  <!-- Legend -->
+  <rect class="bg-teal" x="40" y="570" width="12" height="12" rx="2" stroke-width="0.5"/>
+  <text class="label text-secondary" x="58" y="580">Issuer</text>
+  
+  <rect class="bg-amber" x="110" y="570" width="12" height="12" rx="2" stroke-width="0.5"/>
+  <text class="label text-secondary" x="128" y="580">Secret</text>
+  
+  <rect class="bg-coral" x="180" y="570" width="12" height="12" rx="2" stroke-width="0.5"/>
+  <text class="label text-secondary" x="198" y="580">Operator</text>
+  
+  <rect class="bg-blue" x="270" y="570" width="12" height="12" rx="2" stroke-width="0.5"/>
+  <text class="label text-secondary" x="288" y="580">External stores</text>
+
+  <rect class="bg-gray" x="390" y="570" width="12" height="12" rx="2" stroke-width="0.5"/>
+  <text class="label text-secondary" x="408" y="580">Credentials / Local</text>
+</svg>

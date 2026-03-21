@@ -23,6 +23,8 @@ Enable Kubernetes `cert-manager` to sync TLS certificates to AWS ACM, GCP, Hashi
   - [Forcing an immediate sync](#forcing-an-immediate-sync)
   - [Configuration](#configuration)
   - [Deployment](#deployment)
+    - [Using Helm Repository (Recommended)](#using-helm-repository-recommended)
+    - [Using Local Chart](#using-local-chart)
     - [Optional Operator Configuration](#optional-operator-configuration)
   - [Monitoring](#monitoring)
     - [Prometheus Metrics](#prometheus-metrics)
@@ -35,7 +37,7 @@ Enable Kubernetes `cert-manager` to sync TLS certificates to AWS ACM, GCP, Hashi
 
 ## Architecture
 
-![architecture](./devops/docs/cert-manager-sync.png)
+![architecture](./devops/docs/cert-manager-sync-architecture.svg)
 
 ## Background
 
