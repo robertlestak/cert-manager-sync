@@ -26,6 +26,11 @@ config:
 metrics:
   enabled: false
   port: 9090
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    additionalLabels: {}
 
 serviceAccount:
   # Specifies whether a service account should be created
