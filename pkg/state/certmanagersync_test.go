@@ -346,3 +346,9 @@ func TestNamespaceEnabledEnabledSingleSecretsNamespace(t *testing.T) {
 		})
 	}
 }
+
+func TestKubeConfigExported(t *testing.T) {
+	// KubeConfig should be nil before CreateKubeClient is called
+	// but the variable itself must be accessible (exported)
+	assert.Nil(t, KubeConfig, "KubeConfig should be nil before initialization")
+}
