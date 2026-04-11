@@ -47,7 +47,7 @@ func runController(ctx context.Context) {
 	factory := informers.NewSharedInformerFactory(state.KubeClient, 30*time.Second)
 	secretInformer := factory.Core().V1().Secrets().Informer()
 
-	secretInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, _ = secretInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			s := obj.(*v1.Secret)
 			if !state.SecretWatched(s) {
