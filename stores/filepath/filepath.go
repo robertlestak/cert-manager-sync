@@ -69,16 +69,16 @@ func (s *FilepathStore) Sync(c *tlssecret.Certificate) (map[string]string, error
 	l = l.WithFields(log.Fields{
 		"id": certPath,
 	})
-	if err := os.WriteFile(certPath, c.Certificate, 0644); err != nil {
+	if err := os.WriteFile(certPath, c.Certificate, 0644); err != nil { // #nosec G306 -- certs are public
 		l.WithError(err).Errorf("sync error")
 		return nil, fmt.Errorf("failed to write certificate file to %s: %w", certPath, err)
 	}
-	if err := os.WriteFile(keyPath, c.Key, 0644); err != nil {
+	if err := os.WriteFile(keyPath, c.Key, 0600); err != nil {
 		l.WithError(err).Errorf("sync error")
 		return nil, fmt.Errorf("failed to write key file to %s: %w", keyPath, err)
 	}
 	if len(c.Ca) > 0 {
-		if err := os.WriteFile(caPath, c.Ca, 0644); err != nil {
+		if err := os.WriteFile(caPath, c.Ca, 0644); err != nil { // #nosec G306 -- CA certs are public
 			l.WithError(err).Errorf("sync error")
 			return nil, fmt.Errorf("failed to write CA file to %s: %w", caPath, err)
 		}
