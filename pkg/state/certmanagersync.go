@@ -23,6 +23,7 @@ import (
 var (
 	OperatorName  = "cert-manager-sync.lestak.sh"
 	KubeClient    *kubernetes.Clientset
+	KubeConfig    *rest.Config
 	EventRecorder record.EventRecorder
 )
 
@@ -189,6 +190,7 @@ func CreateKubeClient() error {
 		l.Debugf("kubernetes.NewForConfig error=%v", err)
 		return err
 	}
+	KubeConfig = config
 	// Create broadcaster
 	broadcaster := record.NewBroadcaster()
 	broadcaster.StartRecordingToSink(&typedcorev1.EventSinkImpl{Interface: KubeClient.CoreV1().Events("")})

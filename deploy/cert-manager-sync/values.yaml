@@ -4,6 +4,10 @@
 
 replicaCount: 1
 
+leaderElection:
+  enabled: true
+  lockName: cert-manager-sync-leader
+
 image:
   repository: robertlestak/cert-manager-sync
   pullPolicy: IfNotPresent
