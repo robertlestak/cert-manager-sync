@@ -96,7 +96,7 @@ func (s *ImpervaStore) UploadImpervaCert(cert *tlssecret.Certificate) error {
 		PrivateKey:  bKey,
 		AuthType:    cmp.Or(s.AuthType, "RSA"),
 	}
-	jd, err := json.Marshal(up)
+	jd, err := json.Marshal(up) // #nosec G117 -- private key required by Imperva API
 	if err != nil {
 		l.WithError(err).Errorf("json.Marshal error")
 		return fmt.Errorf("failed to marshal Imperva certificate upload request: %w", err)

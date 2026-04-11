@@ -104,7 +104,7 @@ func (s *ThreatXStore) ThreatxLogin(ctx context.Context) error {
 	}
 	r.Command = "login"
 	r.APIToken = s.APIToken
-	jd, jerr := json.Marshal(r)
+	jd, jerr := json.Marshal(r) // #nosec G117 -- API token required by ThreatX API
 	if jerr != nil {
 		l.Error(jerr)
 		return fmt.Errorf("failed to marshal ThreatX login request: %w", jerr)

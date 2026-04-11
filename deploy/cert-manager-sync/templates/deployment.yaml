@@ -65,6 +65,14 @@ spec:
             value: "{{ if and .Values.metrics .Values.metrics.enabled }}{{ .Values.metrics.enabled }}{{ else }}false{{ end }}"
           - name: METRICS_PORT
             value: "{{ if and .Values.metrics .Values.metrics.port }}{{ .Values.metrics.port }}{{ else }}9090{{ end }}"
+          - name: LEADER_ELECTION_ENABLED
+            value: "{{ .Values.leaderElection.enabled }}"
+          - name: LEADER_ELECTION_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          - name: LEADER_ELECTION_LOCK_NAME
+            value: "{{ .Values.leaderElection.lockName }}"
           {{- with .Values.env }}
           {{- toYaml . | nindent 10 }}
           {{- end }}

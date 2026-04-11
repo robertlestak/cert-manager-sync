@@ -23,6 +23,7 @@ import (
 var (
 	OperatorName  = "cert-manager-sync.lestak.sh"
 	KubeClient    *kubernetes.Clientset
+	KubeConfig    *rest.Config
 	EventRecorder record.EventRecorder
 )
 
@@ -171,7 +172,7 @@ func CreateKubeClient() error {
 	}
 	var config *rest.Config
 	// naïvely assume if no kubeconfig file that we are running in cluster
-	if _, err := os.Stat(kubeconfig); os.IsNotExist(err) {
+	if _, err := os.Stat(kubeconfig); os.IsNotExist(err) { // #nosec G703 -- standard k8s client KUBECONFIG pattern
 		config, err = rest.InClusterConfig()
 		if err != nil {
 			l.Debugf("res.InClusterConfig error=%v", err)
@@ -189,6 +190,7 @@ func CreateKubeClient() error {
 		l.Debugf("kubernetes.NewForConfig error=%v", err)
 		return err
 	}
+	KubeConfig = config
 	// Create broadcaster
 	broadcaster := record.NewBroadcaster()
 	broadcaster.StartRecordingToSink(&typedcorev1.EventSinkImpl{Interface: KubeClient.CoreV1().Events("")})

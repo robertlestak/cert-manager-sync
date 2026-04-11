@@ -165,7 +165,7 @@ func calculateNextRetryTime(secret *corev1.Secret) time.Time {
 	// Calculate the delay using binary exponential backoff
 	var delay time.Duration
 	if retries < 31 {
-		delay = time.Duration(1<<uint(retries)) * time.Minute
+		delay = time.Duration(1<<uint(retries)) * time.Minute // #nosec G115 -- guarded by retries < 31
 	} else {
 		delay = 32 * time.Hour
 	}

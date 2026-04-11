@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -44,7 +45,13 @@ func Serve() {
 		w.WriteHeader(http.StatusOK)
 	})
 	http.Handle("/metrics", promhttp.Handler())
-	if err := http.ListenAndServe(":"+port, nil); err != nil {
+	srv := &http.Server{
+		Addr:         ":" + port,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
+	if err := srv.ListenAndServe(); err != nil {
 		l.WithError(err).Error("error starting http server")
 		os.Exit(1)
 	}
