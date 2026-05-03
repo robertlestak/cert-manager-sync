@@ -1,16 +1,22 @@
 package digitalocean
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"math/big"
+	"net/http"
 	"testing"
 	"time"
+
+	"github.com/digitalocean/godo"
+	"github.com/stretchr/testify/assert"
 )
 
 // GenerateKey generates an ECDSA private key.
@@ -62,6 +68,29 @@ func GenerateCert(key []byte) ([]byte, []byte, error) {
 	})
 
 	return certPem, key, nil
+}
+
+func TestIsDigitalOceanNotFound(t *testing.T) {
+	assert.False(t, isDigitalOceanNotFound(nil, nil))
+	assert.False(t, isDigitalOceanNotFound(nil, errors.New("plain")))
+	resp := &godo.Response{Response: &http.Response{StatusCode: 404}}
+	assert.True(t, isDigitalOceanNotFound(resp, errors.New("not found")))
+	resp500 := &godo.Response{Response: &http.Response{StatusCode: 500}}
+	assert.False(t, isDigitalOceanNotFound(resp500, errors.New("boom")))
+}
+
+func TestDigitalOceanDelete_NoOpWhenCertIdMissing(t *testing.T) {
+	// Sync never populated cert-id → nothing was created remotely → success.
+	s := &DigitalOceanStore{}
+	assert.NoError(t, s.Delete(context.Background()))
+}
+
+func TestDigitalOceanDelete_RequiresSecretNameWhenCertIdSet(t *testing.T) {
+	// cert-id is set but the credentials secret is missing — real config
+	// problem, must surface as an error so the operator retries.
+	s := &DigitalOceanStore{CertId: "abc"}
+	err := s.Delete(context.Background())
+	assert.Error(t, err)
 }
 
 func TestSeparateCertsDO(t *testing.T) {

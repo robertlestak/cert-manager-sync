@@ -87,8 +87,14 @@ func HashSecret(s *corev1.Secret) string {
 		if strings.HasPrefix(k, OperatorName) && k != OperatorName+"/hash" {
 			annotationsMap[k] = v
 		}
-		// also remove the failed-sync-attempts and next-retry annotations
-		if k == OperatorName+"/failed-sync-attempts" || k == OperatorName+"/next-retry" {
+		// remove operator-internal bookkeeping annotations from the hash so
+		// that a failed sync/delete retry counter update does not look like a
+		// material change and trigger a spurious re-sync.
+		switch k {
+		case OperatorName + "/failed-sync-attempts",
+			OperatorName + "/next-retry",
+			OperatorName + "/delete-attempts",
+			OperatorName + "/next-delete":
 			delete(annotationsMap, k)
 		}
 	}

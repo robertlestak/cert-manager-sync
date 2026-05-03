@@ -12,6 +12,8 @@ import (
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/api/option"
 	"google.golang.org/genproto/protobuf/field_mask"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -130,6 +132,62 @@ func (s *GCPStore) UpdateCert(ctx context.Context, gcert *certificatemanagerpb.C
 		return fmt.Errorf("failed to complete GCP certificate update for %s (project: %s, location: %s): %w", s.CertificateName, s.ProjectID, s.Location, err)
 	}
 	l.WithField("name", resp.Name).Debugf("Cert updated in GCP as %s", resp.Name)
+	return nil
+}
+
+// isGCPNotFound returns true when the error reports a gRPC NotFound status,
+// which Certificate Manager uses for missing resources.
+func isGCPNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	return status.Code(err) == codes.NotFound
+}
+
+// Delete removes the certificate from GCP Certificate Manager. Treats
+// NotFound as success so the operation is idempotent.
+func (s *GCPStore) Delete(ctx context.Context) error {
+	l := log.WithFields(log.Fields{
+		"action": "gcpcm.Delete",
+		"name":   s.CertificateName,
+	})
+	if s.CertificateName == "" {
+		// Sync never populated certificate-name, so there is no remote
+		// certificate to clean up. Treat as success so opt-in secrets that
+		// failed their initial sync are not wedged on deletion.
+		l.Debug("no gcp certificate-name recorded; nothing to delete")
+		return nil
+	}
+	var clientOpts []option.ClientOption
+	if s.SecretName != "" {
+		if err := s.GetApiKey(ctx); err != nil {
+			return fmt.Errorf("gcp credentials lookup failed: %w", err)
+		}
+		clientOpts = append(clientOpts, option.WithCredentialsJSON([]byte(s.CredentialsJSON)))
+	}
+	client, err := certificatemanager.NewClient(ctx, clientOpts...)
+	if err != nil {
+		return fmt.Errorf("certificatemanager.NewClient: %w", err)
+	}
+	defer client.Close()
+	op, err := client.DeleteCertificate(ctx, &certificatemanagerpb.DeleteCertificateRequest{
+		Name: s.CertificateName,
+	})
+	if err != nil {
+		if isGCPNotFound(err) {
+			l.Debug("gcp certificate already absent; treating delete as success")
+			return nil
+		}
+		return fmt.Errorf("delete GCP certificate %s: %w", s.CertificateName, err)
+	}
+	if err := op.Wait(ctx); err != nil {
+		if isGCPNotFound(err) {
+			l.Debug("gcp certificate disappeared during delete wait; treating as success")
+			return nil
+		}
+		return fmt.Errorf("await GCP certificate delete %s: %w", s.CertificateName, err)
+	}
+	l.Info("certificate deleted from GCP")
 	return nil
 }
 

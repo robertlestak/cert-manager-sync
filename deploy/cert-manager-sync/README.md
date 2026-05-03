@@ -14,11 +14,14 @@ A Helm chart for cert-manager-sync
 | autoscaling.minReplicas | int | `1` |  |
 | autoscaling.targetCPUUtilizationPercentage | int | `80` |  |
 | clusterRole.create | bool | `true` |  |
+| config.deleteBlocking | string | `"true"` | When `"true"` (default), finalizers are never force-removed — secret deletion blocks until the controller succeeds (Kubernetes-idiomatic). When `"false"`, the finalizer is force-removed after `maxDeleteAttempts` so a misconfigured store cannot wedge a secret; the remote certificate may then need manual cleanup. |
+| config.deletePolicy | string | `"retain"` | Cluster-wide default for cleaning up remote certificates when a watched secret is deleted. `"retain"` leaves remote state untouched; `"delete"` enables cleanup. Per-secret `cert-manager-sync.lestak.sh/delete-policy` annotation overrides. |
 | config.disableCache | string | `"false"` |  |
 | config.disabledNamespaces | string | `""` |  |
 | config.enabledNamespaces | string | `""` |  |
 | config.logFormat | string | `"json"` |  |
 | config.logLevel | string | `"info"` |  |
+| config.maxDeleteAttempts | string | `"10"` | Maximum failed delete attempts before the operator gives up. `"0"` means retry forever. |
 | config.operatorName | string | `"cert-manager-sync.lestak.sh"` |  |
 | config.secretsNamespace | string | `""` |  |
 | env | list | `[]` |  |

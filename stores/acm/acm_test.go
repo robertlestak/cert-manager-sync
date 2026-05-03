@@ -1,16 +1,22 @@
 package acm
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"math/big"
 	"testing"
 	"time"
+
+	"github.com/aws/aws-sdk-go/aws/awserr"
+	"github.com/aws/aws-sdk-go/service/acm"
+	"github.com/stretchr/testify/assert"
 )
 
 // GenerateKey generates an ECDSA private key.
@@ -62,6 +68,21 @@ func GenerateCert(key []byte) ([]byte, []byte, error) {
 	})
 
 	return certPem, key, nil
+}
+
+func TestIsACMNotFound(t *testing.T) {
+	assert.False(t, isACMNotFound(nil))
+	assert.False(t, isACMNotFound(errors.New("plain")))
+	notFound := awserr.New(acm.ErrCodeResourceNotFoundException, "missing", nil)
+	assert.True(t, isACMNotFound(notFound))
+	other := awserr.New(acm.ErrCodeAccessDeniedException, "nope", nil)
+	assert.False(t, isACMNotFound(other))
+}
+
+func TestACMDelete_NoOpWhenArnMissing(t *testing.T) {
+	// Sync never populated certificate-arn → nothing was created → success.
+	s := &ACMStore{}
+	assert.NoError(t, s.Delete(context.Background()))
 }
 
 func TestSeparateCertsACM(t *testing.T) {

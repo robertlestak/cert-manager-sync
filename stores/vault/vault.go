@@ -353,6 +353,71 @@ func (s *VaultStore) convertToPKCS12(cert []byte, key []byte, ca []byte, c *tlss
 	return s.convertToPKCS12WithPassword(cert, key, ca, password)
 }
 
+// deletePath transforms a configured KV v2 user path into the API path used
+// for soft-deleting the latest version of the secret. Mirrors the "data" segment
+// insertion done by WriteSecret. Pure function so it can be tested in isolation.
+func deletePath(userPath string) (string, error) {
+	pp := strings.Split(userPath, "/")
+	if len(pp) < 2 {
+		return "", errors.New("secret path must be in kv/path/to/secret format")
+	}
+	pp = insertSliceString(pp, 1, "data")
+	return strings.Join(pp, "/"), nil
+}
+
+// Delete soft-deletes the latest version of the secret at the configured path.
+// Treats 404 (not-found) responses as success so the operation is idempotent.
+//
+// Note: this performs a KV v2 soft-delete (DELETE on data/ path). All historical
+// versions and metadata remain in Vault. Users who want a permanent purge should
+// retain the secret in K8s and remove it from Vault manually, or extend this
+// store with a destroy mode.
+func (s *VaultStore) Delete(ctx context.Context) error {
+	l := log.WithFields(log.Fields{
+		"action":    "vault.Delete",
+		"vaultAddr": s.Addr,
+		"vaultPath": s.Path,
+	})
+	if s.Path == "" {
+		// No path was configured, so we never wrote anything to Vault.
+		// Treat as success so opt-in secrets that failed their initial sync
+		// are not wedged on deletion.
+		l.Debug("no vault path configured; nothing to delete")
+		return nil
+	}
+	if _, cerr := s.NewClient(); cerr != nil {
+		return fmt.Errorf("vault client init failed: %w", cerr)
+	}
+	if _, terr := s.NewToken(); terr != nil {
+		return fmt.Errorf("vault auth failed: %w", terr)
+	}
+	apiPath, err := deletePath(s.Path)
+	if err != nil {
+		return err
+	}
+	if _, err := s.Client.Logical().DeleteWithContext(ctx, apiPath); err != nil {
+		if isVaultNotFound(err) {
+			l.Debug("vault path already absent; treating delete as success")
+			return nil
+		}
+		return fmt.Errorf("failed to delete Vault path %s: %w", apiPath, err)
+	}
+	l.Info("certificate deleted from vault")
+	return nil
+}
+
+// isVaultNotFound returns true if the error represents a 404 from the Vault API.
+func isVaultNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	var re *api.ResponseError
+	if errors.As(err, &re) {
+		return re.StatusCode == 404
+	}
+	return false
+}
+
 func (s *VaultStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
 	l := log.WithFields(log.Fields{
 		"action":          "Update",

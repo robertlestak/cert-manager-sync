@@ -2,6 +2,7 @@ package heroku
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -116,4 +117,57 @@ func (s *HerokuStore) Sync(c *tlssecret.Certificate) (map[string]string, error) 
 	}
 	l.Info("certificate synced")
 	return keyUpdates, nil
+}
+
+// isHerokuNotFound returns true when the Heroku API responded 404.
+func isHerokuNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	var he heroku.Error
+	if errors.As(err, &he) {
+		return he.StatusCode == 404
+	}
+	return false
+}
+
+// Delete removes the SNI endpoint from the Heroku app. 404 responses are
+// treated as success so the operation is idempotent.
+func (s *HerokuStore) Delete(ctx context.Context) error {
+	l := log.WithFields(log.Fields{
+		"action":   "heroku.Delete",
+		"app":      s.AppName,
+		"certName": s.CertName,
+	})
+	if s.CertName == "" {
+		// Sync never populated cert-name (the SNI endpoint identifier), so
+		// there is no remote endpoint to clean up. Treat as success so
+		// opt-in secrets that failed their initial sync are not wedged on
+		// deletion.
+		l.Debug("no heroku cert-name recorded; nothing to delete")
+		return nil
+	}
+	if s.AppName == "" {
+		return fmt.Errorf("heroku app not set; cannot delete %s", s.CertName)
+	}
+	if s.SecretName == "" {
+		return fmt.Errorf("heroku secret-name not set; cannot resolve API key for delete")
+	}
+	if err := s.GetApiKey(ctx); err != nil {
+		return fmt.Errorf("heroku credentials lookup failed: %w", err)
+	}
+	client := heroku.NewService(&http.Client{
+		Transport: &heroku.Transport{
+			BearerToken: s.ApiKey,
+		},
+	})
+	if _, err := client.SniEndpointDelete(ctx, s.AppName, s.CertName); err != nil {
+		if isHerokuNotFound(err) {
+			l.Debug("heroku SNI endpoint already absent; treating delete as success")
+			return nil
+		}
+		return fmt.Errorf("delete Heroku SNI endpoint %s on app %s: %w", s.CertName, s.AppName, err)
+	}
+	l.Info("certificate deleted from heroku")
+	return nil
 }

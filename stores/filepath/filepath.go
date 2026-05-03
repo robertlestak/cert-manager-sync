@@ -1,6 +1,8 @@
 package filepath
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -85,4 +87,42 @@ func (s *FilepathStore) Sync(c *tlssecret.Certificate) (map[string]string, error
 	}
 	l.Info("certificate synced")
 	return nil, nil
+}
+
+// Delete removes the cert/key/ca files written by Sync. Missing files are
+// treated as success so the operation is idempotent.
+func (s *FilepathStore) Delete(_ context.Context) error {
+	l := log.WithFields(log.Fields{
+		"action": "Delete",
+		"store":  "filepath",
+		"dir":    s.Directory,
+	})
+	if s.Directory == "" {
+		// No directory was configured, so we never wrote anything.
+		// Treat as success so opt-in secrets that failed their initial sync
+		// are not wedged on deletion.
+		l.Debug("no filepath-dir configured; nothing to delete")
+		return nil
+	}
+	cert := s.CertFile
+	if cert == "" {
+		cert = "tls.crt"
+	}
+	key := s.KeyFile
+	if key == "" {
+		key = "tls.key"
+	}
+	ca := s.CAFile
+	if ca == "" {
+		ca = "ca.crt"
+	}
+	for _, name := range []string{cert, key, ca} {
+		path := fp.Join(s.Directory, name)
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			l.WithError(err).WithField("path", path).Errorf("delete error")
+			return fmt.Errorf("failed to remove %s: %w", path, err)
+		}
+	}
+	l.Info("certificate files removed")
+	return nil
 }

@@ -33,6 +33,12 @@
         "config": {
             "type": "object",
             "properties": {
+                "deleteBlocking": {
+                    "type": "string"
+                },
+                "deletePolicy": {
+                    "type": "string"
+                },
                 "disableCache": {
                     "type": "string"
                 },
@@ -46,6 +52,9 @@
                     "type": "string"
                 },
                 "logLevel": {
+                    "type": "string"
+                },
+                "maxDeleteAttempts": {
                     "type": "string"
                 },
                 "operatorName": {

@@ -175,3 +175,37 @@ func (s *HetznerCloudStore) Sync(c *tlssecret.Certificate) (map[string]string, e
 	l.Info("certificate synced")
 	return newKeys, nil
 }
+
+// Delete removes the certificate from Hetzner Cloud. NotFound responses are
+// treated as success so the operation is idempotent.
+func (s *HetznerCloudStore) Delete(ctx context.Context) error {
+	l := log.WithFields(log.Fields{
+		"action": "hetznercloud.Delete",
+		"id":     s.CertId,
+	})
+	if s.CertId == 0 {
+		// Sync never populated cert-id, so there is no remote certificate
+		// to clean up. Treat as success so opt-in secrets that failed their
+		// initial sync are not wedged on deletion.
+		l.Debug("no hetznercloud cert-id recorded; nothing to delete")
+		return nil
+	}
+	if s.ApiToken == "" {
+		if s.SecretName == "" {
+			return fmt.Errorf("hetznercloud secret-name not set; cannot resolve API token for delete")
+		}
+		if err := s.GetApiToken(ctx); err != nil {
+			return fmt.Errorf("hetznercloud credentials lookup failed: %w", err)
+		}
+	}
+	client := hcloud.NewClient(hcloud.WithToken(s.ApiToken))
+	if _, err := client.Certificate.Delete(ctx, &hcloud.Certificate{ID: s.CertId}); err != nil {
+		if hcloud.IsError(err, hcloud.ErrorCodeNotFound) {
+			l.Debug("hetznercloud certificate already absent; treating delete as success")
+			return nil
+		}
+		return fmt.Errorf("delete Hetzner certificate %d: %w", s.CertId, err)
+	}
+	l.Info("certificate deleted from hetznercloud")
+	return nil
+}

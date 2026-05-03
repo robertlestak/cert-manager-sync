@@ -2,12 +2,14 @@ package acm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
 	"strings"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -202,6 +204,50 @@ func (s *ACMStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error {
 		s.SecretNamespace = strings.Split(s.SecretName, "/")[0]
 		s.SecretName = strings.Split(s.SecretName, "/")[1]
 	}
+	return nil
+}
+
+// isACMNotFound returns true when the AWS error code indicates the resource is missing.
+func isACMNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	var ae awserr.Error
+	if errors.As(err, &ae) {
+		return ae.Code() == acm.ErrCodeResourceNotFoundException
+	}
+	return false
+}
+
+// Delete removes the certificate from ACM. ResourceNotFoundException is treated
+// as success so the operation is idempotent.
+func (s *ACMStore) Delete(_ context.Context) error {
+	l := log.WithFields(log.Fields{
+		"action": "acm.Delete",
+		"arn":    s.CertificateArn,
+	})
+	if s.CertificateArn == "" {
+		// Sync never populated the ARN, so there is no remote certificate
+		// to clean up. Treat as success so opt-in secrets that failed their
+		// initial sync are not wedged on deletion.
+		l.Debug("no acm certificate-arn recorded; nothing to delete")
+		return nil
+	}
+	sess, cfg, err := s.createAWSSession()
+	if err != nil {
+		return fmt.Errorf("acm session: %w", err)
+	}
+	svc := acm.New(sess, cfg)
+	if _, err := svc.DeleteCertificate(&acm.DeleteCertificateInput{
+		CertificateArn: aws.String(s.CertificateArn),
+	}); err != nil {
+		if isACMNotFound(err) {
+			l.Debug("acm certificate already absent; treating delete as success")
+			return nil
+		}
+		return fmt.Errorf("delete ACM certificate %s: %w", s.CertificateArn, err)
+	}
+	l.Info("certificate deleted from ACM")
 	return nil
 }
 
