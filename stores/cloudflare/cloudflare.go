@@ -2,6 +2,7 @@ package cloudflare
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -115,4 +116,55 @@ func (s *CloudflareStore) Sync(c *tlssecret.Certificate) (map[string]string, err
 	}
 	l.Info("certificate synced")
 	return newKeys, nil
+}
+
+// isCloudflareNotFound returns true when the error reports a 404 from the
+// Cloudflare API.
+func isCloudflareNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	var cfErr *cloudflare.Error
+	if errors.As(err, &cfErr) {
+		return cfErr.StatusCode == 404
+	}
+	return false
+}
+
+// Delete removes the custom certificate from Cloudflare. 404 responses are
+// treated as success so the operation is idempotent.
+func (s *CloudflareStore) Delete(ctx context.Context) error {
+	l := log.WithFields(log.Fields{
+		"action":  "cloudflare.Delete",
+		"id":      s.CertId,
+		"zone-id": s.ZoneId,
+	})
+	if s.CertId == "" {
+		// Sync never populated cert-id, so there is no remote certificate
+		// to clean up. Treat as success so opt-in secrets that failed their
+		// initial sync are not wedged on deletion.
+		l.Debug("no cloudflare cert-id recorded; nothing to delete")
+		return nil
+	}
+	if s.ZoneId == "" {
+		return fmt.Errorf("cloudflare zone-id not set; cannot delete %s", s.CertId)
+	}
+	if s.SecretName == "" {
+		return fmt.Errorf("cloudflare secret-name not set; cannot resolve API token for delete")
+	}
+	if err := s.GetApiToken(ctx); err != nil {
+		return fmt.Errorf("cloudflare credentials lookup failed: %w", err)
+	}
+	client := cloudflare.NewClient(option.WithAPIToken(s.ApiToken))
+	if _, err := client.CustomCertificates.Delete(ctx, s.CertId, custom_certificates.CustomCertificateDeleteParams{
+		ZoneID: cloudflare.F(s.ZoneId),
+	}); err != nil {
+		if isCloudflareNotFound(err) {
+			l.Debug("cloudflare certificate already absent; treating delete as success")
+			return nil
+		}
+		return fmt.Errorf("delete Cloudflare certificate %s (zone %s): %w", s.CertId, s.ZoneId, err)
+	}
+	l.Info("certificate deleted from cloudflare")
+	return nil
 }

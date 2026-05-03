@@ -61,6 +61,12 @@ spec:
             value: "{{ .Values.config.logFormat }}"
           - name: CACHE_DISABLE
             value: "{{ .Values.config.disableCache }}"
+          - name: DELETE_POLICY
+            value: "{{ .Values.config.deletePolicy }}"
+          - name: MAX_DELETE_ATTEMPTS
+            value: "{{ .Values.config.maxDeleteAttempts }}"
+          - name: DELETE_BLOCKING
+            value: "{{ .Values.config.deleteBlocking }}"
           - name: ENABLE_METRICS
             value: "{{ if and .Values.metrics .Values.metrics.enabled }}{{ .Values.metrics.enabled }}{{ else }}false{{ end }}"
           - name: METRICS_PORT

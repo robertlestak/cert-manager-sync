@@ -409,6 +409,98 @@ kubectl -n cert-manager \
   --overwrite
 ```
 
+## Cleaning up remote certificates on secret deletion
+
+By default, deleting a Kubernetes TLS secret leaves the corresponding remote certificate in place. This preserves backwards-compatible behavior: some users rely on decoupling the K8s secret lifecycle from the remote certificate lifecycle, treat the K8s secret as ephemeral, or recreate secrets without disrupting downstream consumers.
+
+You can opt in to **delete-on-delete** behavior either per-secret (annotation) or cluster-wide (operator env var). When opted in, the operator places a finalizer on the secret and deletes the corresponding remote certificate(s) when the secret is removed.
+
+### Per-secret opt-in
+
+Set the `delete-policy` annotation on the secret:
+
+```yaml
+metadata:
+  annotations:
+    cert-manager-sync.lestak.sh/sync-enabled: "true"
+    cert-manager-sync.lestak.sh/delete-policy: "delete" # default is "retain"
+    cert-manager-sync.lestak.sh/acm-enabled: "true"
+    # ...usual sync annotations...
+```
+
+Once the operator sees an opted-in secret, it adds the finalizer `cert-manager-sync.lestak.sh/cleanup`. When the secret is deleted, the operator iterates each configured store, deletes the remote certificate, and then removes the finalizer.
+
+### Cluster-wide default
+
+To enable delete-on-delete for every watched secret without setting per-secret annotations, set `DELETE_POLICY=delete` on the operator. Per-secret annotations always win, so an individual secret can opt out by setting `cert-manager-sync.lestak.sh/delete-policy: retain`.
+
+### Per-store support
+
+| Store | Delete supported |
+| --- | --- |
+| AWS ACM | yes |
+| Cloudflare | yes |
+| DigitalOcean | yes |
+| Filepath | yes (removes cert/key/ca files) |
+| Google Cloud | yes |
+| HashiCorp Vault | yes (KV v2 soft-delete on the latest version) |
+| Heroku | yes (deletes the SNI endpoint) |
+| Hetzner Cloud | yes |
+| Imperva / Incapsula | **no** — remote state is left unchanged on delete |
+| ThreatX | **no** — remote state is left unchanged on delete |
+
+For stores that do not support delete, the operator emits a `DeleteSkipped` event for that store and treats the skip as success — the deletable stores are still attempted. The finalizer is removed once all deletable stores have succeeded. Imperva and ThreatX expose only "replace the active cert" operations rather than a true delete; if you need cleanup for those stores, do it manually or open an issue describing the desired semantics.
+
+NotFound responses from remote APIs are treated as success so the operation is idempotent — re-running a delete after partial failure is safe.
+
+### Failure handling
+
+If a remote delete fails, the operator increments `cert-manager-sync.lestak.sh/delete-attempts`, schedules the next attempt via `cert-manager-sync.lestak.sh/next-delete` using the same binary exponential backoff as sync (1m, 2m, 4m, … capped at 32h), and retries on each subsequent reconcile.
+
+What happens after `MAX_DELETE_ATTEMPTS` is reached depends on `DELETE_BLOCKING`:
+
+- `DELETE_BLOCKING=true` (default): the operator never gives up. The secret remains in `Terminating` state until the remote delete succeeds (or the finalizer is removed manually). This matches standard Kubernetes finalizer semantics — a deletion you opted in to is not declared complete until cleanup actually succeeds. Failures here usually mean misconfigured credentials, revoked permissions, or transient API outages — fix the underlying issue and the next reconcile will complete the deletion.
+- `DELETE_BLOCKING=false`: the operator force-removes its finalizer so the secret can finalize. The remote certificate may need manual cleanup. A `DeleteGaveUp` warning event is emitted. Use this when you'd rather have orphaned remote state than stuck Kubernetes objects.
+
+`MAX_DELETE_ATTEMPTS` is only consulted when `DELETE_BLOCKING=false`. Setting it to `0` (combined with `DELETE_BLOCKING=false`) means retry forever without ever force-removing.
+
+#### Per-secret opt-out for stuck deletes
+
+If a single secret is stuck `Terminating` and you want to unblock just that one without changing operator config, switch its annotation to `retain`:
+
+```bash
+kubectl -n <namespace> annotate secret <name> \
+  cert-manager-sync.lestak.sh/delete-policy=retain --overwrite
+```
+
+The operator will see the policy change on the next reconcile and remove its finalizer. The remote certificate is left in place.
+
+### Namespace deletion caveat
+
+When you delete a namespace, every secret in it gets a `DeletionTimestamp` simultaneously — including any K8s secret that the operator reads to fetch remote-store credentials (e.g. an `aws-creds` secret used by ACM). If the credentials secret is deleted before the operator gets a chance to read it, every cert-secret in that namespace will fail its remote delete (credentials lookup error) and, with `DELETE_BLOCKING=true`, block the entire namespace from finalizing.
+
+To avoid this:
+
+- Keep cross-cutting credentials in a separate namespace from the cert secrets, and reference them with the `<namespace>/<name>` form on the per-store `secret-name` annotation. The credentials namespace stays alive while the cert namespace finalizes.
+- Or, before deleting a namespace that contains both the certs and their credentials, switch the cert secrets' policy to `retain` (or set `DELETE_POLICY=retain` cluster-wide), wait for the operator to drop its finalizers, then delete the namespace.
+- Or, set `DELETE_BLOCKING=false` on the operator, accepting that the credentials secret might disappear first and remote certs may need manual cleanup.
+
+### Uninstalling the operator
+
+Finalizers placed by the operator can wedge secret deletion if the operator is uninstalled while opted-in secrets still exist. Before uninstalling:
+
+1. Set `DELETE_POLICY=retain` on the operator (or remove the per-secret annotations) and let it drain — the operator drops its finalizer when policy flips to `retain`.
+2. Confirm no watched secrets carry `cert-manager-sync.lestak.sh/cleanup` in their finalizers.
+3. Uninstall.
+
+If you need to remove a stuck finalizer manually:
+
+```bash
+kubectl patch secret <name> -n <namespace> \
+  --type=json \
+  -p='[{"op": "remove", "path": "/metadata/finalizers"}]'
+```
+
 ## Configuration
 
 The operator uses Kubernetes annotations to define the sync locations and configurations.
@@ -474,6 +566,9 @@ metadata:
     cert-manager-sync.lestak.sh/failed-sync-attempts: "0" # number of failed sync attempts, will be auto-filled by operator
     cert-manager-sync.lestak.sh/next-retry: "2022-01-01T00:00:00Z" # next retry time (RFC3339), will be auto-filled by operator. Remove this if you want to retry immediately.
     cert-manager-sync.lestak.sh/hash: "abc123" # hash of the secret for tracking changes, will be auto-filled by operator
+    cert-manager-sync.lestak.sh/delete-policy: "delete" # opt-in to deleting remote certificates when this secret is deleted. "retain" (default) leaves remote state untouched. See "Cleaning up remote certificates on secret deletion" for details.
+    cert-manager-sync.lestak.sh/delete-attempts: "0" # number of failed delete attempts, will be auto-filled by operator
+    cert-manager-sync.lestak.sh/next-delete: "2022-01-01T00:00:00Z" # next delete retry time (RFC3339), will be auto-filled by operator
 data:
   tls.crt: ""
   tls.key: ""
@@ -540,6 +635,9 @@ LOG_LEVEL=info # Log level. trace, debug, info, warn, error, fatal
 CACHE_DISABLE=false # Disable cache
 METRICS_PORT=9090 # Metrics port
 ENABLE_METRICS=true # Enable metrics server
+DELETE_POLICY=retain # Cluster-wide default for remote cert cleanup on secret deletion. "retain" (default) or "delete". Per-secret annotation overrides.
+MAX_DELETE_ATTEMPTS=10 # Maximum failed delete attempts. Only used when DELETE_BLOCKING=false. 0 means retry forever.
+DELETE_BLOCKING=true # When true (default), finalizers are never force-removed — secret deletion blocks until the remote delete succeeds (Kubernetes-idiomatic). Set to "false" to force-remove the finalizer after MAX_DELETE_ATTEMPTS.
 ```
 
 If deploying with helm, these are exposed as values in the `values.yaml` file.
@@ -553,6 +651,9 @@ config:
   logLevel: "info"
   logFormat: "json"
   disableCache: "false"
+  deletePolicy: "retain"
+  maxDeleteAttempts: "10"
+  deleteBlocking: "true"
 
 metrics:
   enabled: false

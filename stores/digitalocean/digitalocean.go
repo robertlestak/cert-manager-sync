@@ -76,6 +76,51 @@ func separateCertsDO(ca, crt, key []byte) *godo.CertificateRequest {
 	return im
 }
 
+// isDigitalOceanNotFound returns true if the godo response indicates the cert is missing.
+func isDigitalOceanNotFound(resp *godo.Response, err error) bool {
+	if err == nil {
+		return false
+	}
+	if resp != nil && resp.StatusCode == 404 {
+		return true
+	}
+	return false
+}
+
+// Delete removes the certificate from DigitalOcean. 404 responses are treated
+// as success so the operation is idempotent.
+func (s *DigitalOceanStore) Delete(ctx context.Context) error {
+	l := log.WithFields(log.Fields{
+		"action": "digitalocean.Delete",
+		"id":     s.CertId,
+	})
+	if s.CertId == "" {
+		// Sync never populated cert-id, so there is no remote certificate
+		// to clean up. Treat as success so opt-in secrets that failed their
+		// initial sync are not wedged on deletion.
+		l.Debug("no digitalocean cert-id recorded; nothing to delete")
+		return nil
+	}
+	if s.SecretName == "" {
+		return fmt.Errorf("digitalocean secret-name not set; cannot resolve API key for delete")
+	}
+	if err := s.GetApiKey(ctx); err != nil {
+		return fmt.Errorf("digitalocean credentials lookup failed: %w", err)
+	}
+	tokenSource := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: s.ApiKey})
+	client := godo.NewClient(oauth2.NewClient(ctx, tokenSource))
+	resp, err := client.Certificates.Delete(ctx, s.CertId)
+	if err != nil {
+		if isDigitalOceanNotFound(resp, err) {
+			l.Debug("digitalocean certificate already absent; treating delete as success")
+			return nil
+		}
+		return fmt.Errorf("delete DigitalOcean certificate %s: %w", s.CertId, err)
+	}
+	l.Info("certificate deleted from digitalocean")
+	return nil
+}
+
 func (s *DigitalOceanStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
 	s.SecretNamespace = c.Namespace
 	l := log.WithFields(log.Fields{

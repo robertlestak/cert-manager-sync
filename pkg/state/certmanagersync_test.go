@@ -68,6 +68,39 @@ func TestHashSecretDataAndAnnotationsChange(t *testing.T) {
 	assert.NotEqual(t, baseHash, modifiedAnnotationsHash, "Hash should change with tracked annotation modification")
 }
 
+// TestHashSecretIgnoresInternalBookkeepingAnnotations verifies that operator-internal
+// retry tracking annotations are excluded from the secret hash. If they were
+// included, every failed sync/delete attempt would change the hash and trigger
+// a spurious re-sync to all configured stores on the next reconcile.
+func TestHashSecretIgnoresInternalBookkeepingAnnotations(t *testing.T) {
+	base := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-secret",
+			Namespace: "default",
+			Annotations: map[string]string{
+				OperatorName + "/sync-enabled": "true",
+				OperatorName + "/acm-region":   "us-east-1",
+			},
+		},
+		Data: map[string][]byte{
+			"data-key": []byte("data-value"),
+		},
+	}
+	baseHash := HashSecret(base)
+	for _, key := range []string{
+		"/failed-sync-attempts",
+		"/next-retry",
+		"/delete-attempts",
+		"/next-delete",
+	} {
+		t.Run(key, func(t *testing.T) {
+			s := base.DeepCopy()
+			s.Annotations[OperatorName+key] = "some-value"
+			assert.Equal(t, baseHash, HashSecret(s), "annotation %s must not affect hash", key)
+		})
+	}
+}
+
 // TestCmsHash checks if cmsHash correctly extracts the hash from the secret's annotations
 func TestCmsHash(t *testing.T) {
 	hash := cmsHash(mockSecret)

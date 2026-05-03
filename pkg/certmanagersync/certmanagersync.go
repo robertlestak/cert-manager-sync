@@ -32,6 +32,13 @@ type RemoteStore interface {
 	FromConfig(config tlssecret.GenericSecretSyncConfig) error
 }
 
+// newStoreFn is the function used to instantiate a RemoteStore by type. It's
+// defined as a var so tests can swap in stub stores without touching the
+// real registry.
+var newStoreFn = func(storeType string) (RemoteStore, error) {
+	return NewStore(cmtypes.StoreType(storeType))
+}
+
 func NewStore(storeType cmtypes.StoreType) (RemoteStore, error) {
 	l := log.WithFields(log.Fields{
 		"action": "NewStore",

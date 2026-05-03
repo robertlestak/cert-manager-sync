@@ -2,6 +2,7 @@ package main
 
 import (
 	"cmp"
+	"context"
 	"os"
 	"time"
 
@@ -54,22 +55,18 @@ func main() {
 
 	secretInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			s := obj.(*v1.Secret)
-			if !state.SecretWatched(s) {
+			s, ok := obj.(*v1.Secret)
+			if !ok {
 				return
 			}
-			if err := certmanagersync.HandleSecret(s); err != nil {
-				l.Error(err)
-			}
+			reconcileSecret(l, s)
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
-			s := newObj.(*v1.Secret)
-			if !state.SecretWatched(s) {
+			s, ok := newObj.(*v1.Secret)
+			if !ok {
 				return
 			}
-			if err := certmanagersync.HandleSecret(s); err != nil {
-				l.Error(err)
-			}
+			reconcileSecret(l, s)
 		},
 	})
 
@@ -82,4 +79,70 @@ func main() {
 
 	// Run the informer
 	<-stopper
+}
+
+// Function-typed indirection so reconcileSecret can be exercised without
+// reaching into the real Kubernetes client or store implementations.
+var (
+	handleSecretFn       = certmanagersync.HandleSecret
+	handleSecretDeleteFn = certmanagersync.HandleSecretDelete
+	ensureFinalizerFn    = certmanagersync.EnsureFinalizer
+	removeFinalizerFn    = certmanagersync.RemoveFinalizer
+)
+
+// reconcileSecret routes a secret event to the right handler based on its
+// deletion timestamp, finalizer state, and effective delete policy.
+//
+// Order matters:
+//  1. If the secret is pending deletion AND carries our finalizer, drive
+//     HandleSecretDelete — even if the secret is no longer "watched" (data
+//     may already be cleared).
+//  2. Otherwise, only watched secrets get any further work.
+//  3. For watched secrets with a delete-policy of "delete", ensure the
+//     finalizer is in place before syncing so a subsequent deletion is caught.
+//  4. For watched secrets that have switched away from "delete", drop the
+//     finalizer so the user is not left with a stuck secret.
+//  5. Run the normal HandleSecret sync path.
+func reconcileSecret(l *log.Entry, s *v1.Secret) {
+	ctx := context.Background()
+
+	if state.SecretDeletePending(s) {
+		if err := handleSecretDeleteFn(s); err != nil {
+			l.WithError(err).WithFields(log.Fields{
+				"namespace": s.Namespace,
+				"name":      s.Name,
+			}).Error("delete reconcile error")
+		}
+		return
+	}
+
+	if !state.SecretWatched(s) {
+		// The secret may have lost its sync-enabled annotation while still
+		// carrying our finalizer; drop the finalizer so the user is not stuck.
+		if state.HasFinalizer(s) && s.DeletionTimestamp == nil {
+			if _, err := removeFinalizerFn(ctx, s); err != nil {
+				l.WithError(err).Error("failed to remove finalizer from no-longer-watched secret")
+			}
+		}
+		return
+	}
+
+	if state.EffectiveDeletePolicy(s) == state.DeletePolicyDelete {
+		if _, err := ensureFinalizerFn(ctx, s); err != nil {
+			l.WithError(err).WithFields(log.Fields{
+				"namespace": s.Namespace,
+				"name":      s.Name,
+			}).Error("failed to ensure delete finalizer")
+			// Don't return — still attempt the sync.
+		}
+	} else if state.HasFinalizer(s) {
+		// Policy flipped from delete -> retain; drop the finalizer.
+		if _, err := removeFinalizerFn(ctx, s); err != nil {
+			l.WithError(err).Error("failed to remove finalizer after policy change")
+		}
+	}
+
+	if err := handleSecretFn(s); err != nil {
+		l.Error(err)
+	}
 }

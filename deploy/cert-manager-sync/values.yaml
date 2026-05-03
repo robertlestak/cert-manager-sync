@@ -22,6 +22,19 @@ config:
   logLevel: "info"
   logFormat: "json"
   disableCache: "false"
+  # Cluster-wide default for cleaning up remote certs on secret deletion.
+  # "retain" (default) leaves remote state untouched. "delete" enables cleanup
+  # for every watched secret unless the per-secret delete-policy annotation
+  # opts back out. See README "Cleaning up remote certificates on secret deletion".
+  deletePolicy: "retain"
+  # Maximum failed delete attempts before the operator gives up. 0 = retry forever.
+  maxDeleteAttempts: "10"
+  # When "true" (default), finalizers are never force-removed on persistent
+  # delete failure — secret deletion blocks until the controller succeeds
+  # (Kubernetes-idiomatic finalizer behavior). When "false", the finalizer is
+  # force-removed after maxDeleteAttempts so a misconfigured store cannot wedge
+  # a secret; the remote certificate may then need manual cleanup.
+  deleteBlocking: "true"
 
 metrics:
   enabled: false
