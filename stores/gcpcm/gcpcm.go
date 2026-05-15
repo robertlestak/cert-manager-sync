@@ -192,7 +192,9 @@ func (s *GCPStore) Delete(ctx context.Context) error {
 }
 
 func (s *GCPStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
-	s.SecretNamespace = c.Namespace
+	if s.SecretNamespace == "" {
+		s.SecretNamespace = c.Namespace
+	}
 	l := log.WithFields(log.Fields{
 		"action":          "Sync",
 		"store":           "gcp",

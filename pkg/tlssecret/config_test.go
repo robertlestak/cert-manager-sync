@@ -220,6 +220,93 @@ func TestSecretMetaToGenericSecretSyncConfig(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "Test enabled-only config preserved when it is the only store config",
+			meta: map[string][]map[string]string{
+				"acm": {
+					{"enabled": "true"},
+				},
+			},
+			want: []*GenericSecretSyncConfig{
+				{
+					Store:  "acm",
+					Index:  -1,
+					Config: map[string]string{"enabled": "true"},
+				},
+			},
+		},
+		{
+			name: "Test disabled config is ignored",
+			meta: map[string][]map[string]string{
+				"acm": {
+					{"enabled": "false"},
+					{"certificate-arn": "arn"},
+				},
+			},
+			want: []*GenericSecretSyncConfig{},
+		},
+		{
+			name: "Test unindexed enabled-only config ignored when indexed configs exist",
+			meta: map[string][]map[string]string{
+				"cloudflare": {
+					{"enabled": "true"},
+					{"secret-name.0": "cloudflare-poc"},
+					{"zone-id.0": "zone-a"},
+					{"secret-name.1": "cloudflare-poc"},
+					{"zone-id.1": "zone-b"},
+				},
+			},
+			want: []*GenericSecretSyncConfig{
+				{
+					Store:  "cloudflare",
+					Index:  0,
+					Config: map[string]string{"secret-name": "cloudflare-poc", "zone-id": "zone-a"},
+				},
+				{
+					Store:  "cloudflare",
+					Index:  1,
+					Config: map[string]string{"secret-name": "cloudflare-poc", "zone-id": "zone-b"},
+				},
+			},
+		},
+		{
+			name: "Test ACM enabled-only config preserved when indexed configs exist",
+			meta: map[string][]map[string]string{
+				"acm": {
+					{"enabled": "true"},
+					{"role-arn.0": "arn:aws:iam::111111111111:role/cert-manager"},
+				},
+			},
+			want: []*GenericSecretSyncConfig{
+				{
+					Store:  "acm",
+					Index:  -1,
+					Config: map[string]string{"enabled": "true"},
+				},
+				{
+					Store:  "acm",
+					Index:  0,
+					Config: map[string]string{"role-arn": "arn:aws:iam::111111111111:role/cert-manager"},
+				},
+			},
+		},
+		{
+			name: "Test enabled config with other keys is preserved",
+			meta: map[string][]map[string]string{
+				"cloudflare": {
+					{"enabled": "true"},
+					{"secret-name": "cloudflare-poc"},
+					{"zone-id": "zone-a"},
+				},
+			},
+			want: []*GenericSecretSyncConfig{
+				{
+					Store:  "cloudflare",
+					Index:  -1,
+					Config: map[string]string{"enabled": "true", "secret-name": "cloudflare-poc", "zone-id": "zone-a"},
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {

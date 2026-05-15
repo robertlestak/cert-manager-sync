@@ -22,7 +22,7 @@ import (
 
 var (
 	OperatorName  = "cert-manager-sync.lestak.sh"
-	KubeClient    *kubernetes.Clientset
+	KubeClient    kubernetes.Interface
 	EventRecorder record.EventRecorder
 )
 

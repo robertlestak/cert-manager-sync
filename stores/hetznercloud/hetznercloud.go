@@ -81,7 +81,9 @@ func (s *HetznerCloudStore) FromConfig(c tlssecret.GenericSecretSyncConfig) erro
 }
 
 func (s *HetznerCloudStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
-	s.SecretNamespace = c.Namespace
+	if s.SecretNamespace == "" {
+		s.SecretNamespace = c.Namespace
+	}
 	l := log.WithFields(log.Fields{
 		"action":          "Update",
 		"store":           "hetznercloud",

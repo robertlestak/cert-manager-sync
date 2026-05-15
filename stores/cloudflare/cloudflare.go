@@ -61,8 +61,14 @@ func (s *CloudflareStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error 
 	return nil
 }
 
+func (s *CloudflareStore) setDefaultSecretNamespace(namespace string) {
+	if s.SecretNamespace == "" {
+		s.SecretNamespace = namespace
+	}
+}
+
 func (s *CloudflareStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
-	s.SecretNamespace = c.Namespace
+	s.setDefaultSecretNamespace(c.Namespace)
 	l := log.WithFields(log.Fields{
 		"action":          "Sync",
 		"store":           "cloudflare",

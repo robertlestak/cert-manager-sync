@@ -252,7 +252,9 @@ func (s *ACMStore) Delete(_ context.Context) error {
 }
 
 func (s *ACMStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
-	s.SecretNamespace = c.Namespace
+	if s.SecretNamespace == "" {
+		s.SecretNamespace = c.Namespace
+	}
 	l := log.WithFields(log.Fields{
 		"action":     "Sync",
 		"secretName": c.SecretName,

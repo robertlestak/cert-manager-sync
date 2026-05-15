@@ -16,7 +16,10 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/service/acm"
+	"github.com/robertlestak/cert-manager-sync/pkg/state"
+	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
 	"github.com/stretchr/testify/assert"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 // GenerateKey generates an ECDSA private key.
@@ -83,6 +86,62 @@ func TestACMDelete_NoOpWhenArnMissing(t *testing.T) {
 	// Sync never populated certificate-arn → nothing was created → success.
 	s := &ACMStore{}
 	assert.NoError(t, s.Delete(context.Background()))
+}
+
+func TestACMSyncSecretNamespaceDefaulting(t *testing.T) {
+	oldClient := state.KubeClient
+	state.KubeClient = fake.NewSimpleClientset()
+	t.Cleanup(func() { state.KubeClient = oldClient })
+
+	key, err := GenerateKey()
+	assert.NoError(t, err)
+	cert, _, err := GenerateCert(key)
+	assert.NoError(t, err)
+
+	cases := []struct {
+		name        string
+		secretName  string
+		wantName    string
+		wantNS      string
+		errContains string
+	}{
+		{
+			name:        "defaults plain secret name",
+			secretName:  "aws-creds",
+			wantName:    "aws-creds",
+			wantNS:      "cert-manager",
+			errContains: "cert-manager/aws-creds",
+		},
+		{
+			name:        "preserves namespaced secret name",
+			secretName:  "shared/aws-creds",
+			wantName:    "aws-creds",
+			wantNS:      "shared",
+			errContains: "shared/aws-creds",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &ACMStore{}
+			err := s.FromConfig(tlssecret.GenericSecretSyncConfig{
+				Config: map[string]string{"secret-name": tc.secretName},
+			})
+			assert.NoError(t, err)
+
+			_, err = s.Sync(&tlssecret.Certificate{
+				SecretName:  "source",
+				Namespace:   "cert-manager",
+				Certificate: cert,
+				Key:         key,
+			})
+
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), tc.errContains)
+			assert.Equal(t, tc.wantName, s.SecretName)
+			assert.Equal(t, tc.wantNS, s.SecretNamespace)
+		})
+	}
 }
 
 func TestSeparateCertsACM(t *testing.T) {

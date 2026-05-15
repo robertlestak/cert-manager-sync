@@ -1,32 +1,15 @@
-package gcpcm
+package imperva
 
 import (
-	"context"
-	"errors"
 	"testing"
 
 	"github.com/robertlestak/cert-manager-sync/pkg/state"
 	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
 	"github.com/stretchr/testify/assert"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
-func TestIsGCPNotFound(t *testing.T) {
-	assert.False(t, isGCPNotFound(nil))
-	assert.False(t, isGCPNotFound(errors.New("plain")))
-	assert.True(t, isGCPNotFound(status.Error(codes.NotFound, "missing")))
-	assert.False(t, isGCPNotFound(status.Error(codes.Internal, "boom")))
-}
-
-func TestDelete_NoOpWhenCertificateNameMissing(t *testing.T) {
-	// Sync never populated certificate-name → nothing was created → success.
-	s := &GCPStore{}
-	assert.NoError(t, s.Delete(context.Background()))
-}
-
-func TestGCPSyncSecretNamespaceDefaulting(t *testing.T) {
+func TestImpervaSyncSecretNamespaceDefaulting(t *testing.T) {
 	oldClient := state.KubeClient
 	state.KubeClient = fake.NewSimpleClientset()
 	t.Cleanup(func() { state.KubeClient = oldClient })
@@ -40,28 +23,27 @@ func TestGCPSyncSecretNamespaceDefaulting(t *testing.T) {
 	}{
 		{
 			name:        "defaults plain secret name",
-			secretName:  "gcp-creds",
-			wantName:    "gcp-creds",
+			secretName:  "imperva-creds",
+			wantName:    "imperva-creds",
 			wantNS:      "cert-manager",
-			errContains: "cert-manager/gcp-creds",
+			errContains: "cert-manager/imperva-creds",
 		},
 		{
 			name:        "preserves namespaced secret name",
-			secretName:  "shared/gcp-creds",
-			wantName:    "gcp-creds",
+			secretName:  "shared/imperva-creds",
+			wantName:    "imperva-creds",
 			wantNS:      "shared",
-			errContains: "shared/gcp-creds",
+			errContains: "shared/imperva-creds",
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			s := &GCPStore{}
+			s := &ImpervaStore{}
 			err := s.FromConfig(tlssecret.GenericSecretSyncConfig{
 				Config: map[string]string{
 					"secret-name": tc.secretName,
-					"project":     "project",
-					"location":    "global",
+					"site-id":     "site",
 				},
 			})
 			assert.NoError(t, err)

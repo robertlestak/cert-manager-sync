@@ -6,7 +6,10 @@ import (
 	"testing"
 
 	"github.com/cloudflare/cloudflare-go/v5"
+	"github.com/robertlestak/cert-manager-sync/pkg/state"
+	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
 	"github.com/stretchr/testify/assert"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 func TestIsCloudflareNotFound(t *testing.T) {
@@ -39,6 +42,94 @@ func TestCloudflareDelete_RequiresOtherConfigWhenCertIdSet(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.s.Delete(context.Background())
 			assert.Error(t, err)
+		})
+	}
+}
+
+func TestCloudflareFromConfigParsesNamespacedSecretName(t *testing.T) {
+	s := &CloudflareStore{}
+
+	err := s.FromConfig(tlssecret.GenericSecretSyncConfig{
+		Config: map[string]string{
+			"secret-name": "istio-system/cloudflare-poc",
+			"zone-id":     "zone",
+			"cert-id":     "cert",
+		},
+	})
+
+	assert.NoError(t, err)
+	assert.Equal(t, "cloudflare-poc", s.SecretName)
+	assert.Equal(t, "istio-system", s.SecretNamespace)
+	assert.Equal(t, "zone", s.ZoneId)
+	assert.Equal(t, "cert", s.CertId)
+}
+
+func TestCloudflareSetDefaultSecretNamespace(t *testing.T) {
+	t.Run("defaults when empty", func(t *testing.T) {
+		s := &CloudflareStore{}
+
+		s.setDefaultSecretNamespace("cert-manager")
+
+		assert.Equal(t, "cert-manager", s.SecretNamespace)
+	})
+
+	t.Run("preserves configured namespace", func(t *testing.T) {
+		s := &CloudflareStore{SecretNamespace: "istio-system"}
+
+		s.setDefaultSecretNamespace("cert-manager")
+
+		assert.Equal(t, "istio-system", s.SecretNamespace)
+	})
+}
+
+func TestCloudflareSyncSecretNamespaceDefaulting(t *testing.T) {
+	oldClient := state.KubeClient
+	state.KubeClient = fake.NewSimpleClientset()
+	t.Cleanup(func() { state.KubeClient = oldClient })
+
+	cases := []struct {
+		name        string
+		secretName  string
+		wantName    string
+		wantNS      string
+		errContains string
+	}{
+		{
+			name:        "defaults plain secret name",
+			secretName:  "cloudflare-poc",
+			wantName:    "cloudflare-poc",
+			wantNS:      "cert-manager",
+			errContains: "cert-manager/cloudflare-poc",
+		},
+		{
+			name:        "preserves namespaced secret name",
+			secretName:  "istio-system/cloudflare-poc",
+			wantName:    "cloudflare-poc",
+			wantNS:      "istio-system",
+			errContains: "istio-system/cloudflare-poc",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &CloudflareStore{}
+			err := s.FromConfig(tlssecret.GenericSecretSyncConfig{
+				Config: map[string]string{
+					"secret-name": tc.secretName,
+					"zone-id":     "zone",
+				},
+			})
+			assert.NoError(t, err)
+
+			_, err = s.Sync(&tlssecret.Certificate{
+				SecretName: "source",
+				Namespace:  "cert-manager",
+			})
+
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), tc.errContains)
+			assert.Equal(t, tc.wantName, s.SecretName)
+			assert.Equal(t, tc.wantNS, s.SecretNamespace)
 		})
 	}
 }

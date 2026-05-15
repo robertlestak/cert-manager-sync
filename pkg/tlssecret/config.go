@@ -127,7 +127,42 @@ func SecretMetaToGenericSecretSyncConfig(meta map[string][]map[string]string) ([
 		}
 		return configs[i].Index < configs[j].Index
 	})
-	return configs, nil
+	return filterEnabledConfigs(configs), nil
+}
+
+func hasNonEnabledConfig(c *GenericSecretSyncConfig) bool {
+	for k := range c.Config {
+		if k != "enabled" {
+			return true
+		}
+	}
+	return false
+}
+
+func storeCanSyncWithEnabledOnlyConfig(store string) bool {
+	return store == string(cmtypes.ACMStoreType)
+}
+
+func filterEnabledConfigs(configs []*GenericSecretSyncConfig) []*GenericSecretSyncConfig {
+	storeHasNonEnabledConfig := make(map[string]bool)
+	for _, c := range configs {
+		if hasNonEnabledConfig(c) {
+			storeHasNonEnabledConfig[c.Store] = true
+		}
+	}
+
+	filtered := make([]*GenericSecretSyncConfig, 0, len(configs))
+	for _, c := range configs {
+		enabled, hasEnabled := c.Config["enabled"]
+		if hasEnabled && strings.EqualFold(enabled, "false") {
+			continue
+		}
+		if hasEnabled && strings.EqualFold(enabled, "true") && !hasNonEnabledConfig(c) && storeHasNonEnabledConfig[c.Store] && !storeCanSyncWithEnabledOnlyConfig(c.Store) {
+			continue
+		}
+		filtered = append(filtered, c)
+	}
+	return filtered
 }
 
 func SyncsForStore(sec *v1.Secret, storeName string) ([]*GenericSecretSyncConfig, error) {

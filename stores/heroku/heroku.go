@@ -58,7 +58,9 @@ func (s *HerokuStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error {
 }
 
 func (s *HerokuStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
-	s.SecretNamespace = c.Namespace
+	if s.SecretNamespace == "" {
+		s.SecretNamespace = c.Namespace
+	}
 	l := log.WithFields(log.Fields{
 		"action":          "Sync",
 		"store":           "heroku",

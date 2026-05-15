@@ -16,7 +16,10 @@ import (
 	"time"
 
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
+	"github.com/robertlestak/cert-manager-sync/pkg/state"
 	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
+	"github.com/stretchr/testify/assert"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 // generateTestCertificate generates a valid self-signed certificate for testing
@@ -66,6 +69,55 @@ func generateTestCertificate() (cert []byte, key []byte, error error) {
 	return certPEM, keyPEM, nil
 }
 
+func TestHetznerCloudSyncSecretNamespaceDefaulting(t *testing.T) {
+	oldClient := state.KubeClient
+	state.KubeClient = fake.NewSimpleClientset()
+	t.Cleanup(func() { state.KubeClient = oldClient })
+
+	cases := []struct {
+		name        string
+		secretName  string
+		wantName    string
+		wantNS      string
+		errContains string
+	}{
+		{
+			name:        "defaults plain secret name",
+			secretName:  "hcloud-creds",
+			wantName:    "hcloud-creds",
+			wantNS:      "cert-manager",
+			errContains: "cert-manager/hcloud-creds",
+		},
+		{
+			name:        "preserves namespaced secret name",
+			secretName:  "shared/hcloud-creds",
+			wantName:    "hcloud-creds",
+			wantNS:      "shared",
+			errContains: "shared/hcloud-creds",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &HetznerCloudStore{}
+			err := s.FromConfig(tlssecret.GenericSecretSyncConfig{
+				Config: map[string]string{"secret-name": tc.secretName},
+			})
+			assert.NoError(t, err)
+
+			_, err = s.Sync(&tlssecret.Certificate{
+				SecretName: "source",
+				Namespace:  "cert-manager",
+			})
+
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), tc.errContains)
+			assert.Equal(t, tc.wantName, s.SecretName)
+			assert.Equal(t, tc.wantNS, s.SecretNamespace)
+		})
+	}
+}
+
 // TestIntegrationSyncWithLabels tests the full sync process with labels using a real Hetzner Cloud API
 // This test is skipped by default and only runs when HETZNER_TEST_TOKEN is set
 func TestIntegrationSyncWithLabels(t *testing.T) {
@@ -98,10 +150,10 @@ func TestIntegrationSyncWithLabels(t *testing.T) {
 		{
 			name: "kubernetes_style_labels",
 			labels: map[string]string{
-				"app.kubernetes.io/name":       "cert-sync",
-				"app.kubernetes.io/instance":   "production",
-				"app.kubernetes.io/component":  "certificate",
-				"cert-manager.io/issuer-name":  "letsencrypt",
+				"app.kubernetes.io/name":      "cert-sync",
+				"app.kubernetes.io/instance":  "production",
+				"app.kubernetes.io/component": "certificate",
+				"cert-manager.io/issuer-name": "letsencrypt",
 			},
 			valid: true,
 		},
@@ -171,14 +223,14 @@ func TestIntegrationSyncWithLabels(t *testing.T) {
 								t.Errorf("Expected labels: %v", tc.labels)
 								t.Errorf("Actual labels: %v", cert.Labels)
 							}
-							
+
 							// Check each expected label
 							for k, v := range tc.labels {
 								if cert.Labels[k] != v {
 									t.Errorf("Label mismatch for key %s: expected %s, got %s", k, v, cert.Labels[k])
 								}
 							}
-							
+
 							// Log successful label verification
 							t.Logf("Labels verified successfully on certificate %d: %v", certId, cert.Labels)
 						}
@@ -282,7 +334,7 @@ func TestDuplicateCertificateNames(t *testing.T) {
 
 	// Create two certificates with the same name
 	sameName := fmt.Sprintf("duplicate-test-%d", time.Now().Unix())
-	
+
 	// Create first certificate
 	cert1Opts := hcloud.CertificateCreateOpts{
 		Name:        sameName,
@@ -290,7 +342,7 @@ func TestDuplicateCertificateNames(t *testing.T) {
 		Certificate: string(testCert1),
 		PrivateKey:  string(testKey1),
 	}
-	
+
 	result1, _, err := client.Certificate.Create(ctx, cert1Opts)
 	if err != nil {
 		t.Fatalf("Failed to create first certificate: %v", err)
@@ -305,7 +357,7 @@ func TestDuplicateCertificateNames(t *testing.T) {
 		Certificate: string(testCert2),
 		PrivateKey:  string(testKey2),
 	}
-	
+
 	result2, _, err := client.Certificate.Create(ctx, cert2Opts)
 	if err != nil {
 		// Check if it's a uniqueness error
@@ -314,12 +366,12 @@ func TestDuplicateCertificateNames(t *testing.T) {
 		} else {
 			t.Logf("Failed to create second certificate with error: %v", err)
 		}
-		
+
 		// Clean up first certificate
 		_, _ = client.Certificate.Delete(ctx, cert1)
 		return
 	}
-	
+
 	// If we get here, two certificates with same name were created
 	cert2 := result2
 	t.Logf("Created second certificate with same name: %s (ID: %d)", cert2.Name, cert2.ID)
@@ -395,13 +447,13 @@ func TestIntegrationCertificateInUse(t *testing.T) {
 
 	// Step 2: Create a Load Balancer and attach the certificate
 	lbName := fmt.Sprintf("lb-test-%d", time.Now().Unix())
-	
+
 	// Get a network (using the first available network, or create one)
 	networks, err := client.Network.All(ctx)
 	if err != nil {
 		t.Fatalf("Failed to list networks: %v", err)
 	}
-	
+
 	var network *hcloud.Network
 	if len(networks) > 0 {
 		network = networks[0]
@@ -409,7 +461,7 @@ func TestIntegrationCertificateInUse(t *testing.T) {
 	} else {
 		// Create a network for testing
 		networkOpts := hcloud.NetworkCreateOpts{
-			Name:    fmt.Sprintf("test-network-%d", time.Now().Unix()),
+			Name: fmt.Sprintf("test-network-%d", time.Now().Unix()),
 			IPRange: &net.IPNet{
 				IP:   net.IPv4(10, 0, 0, 0),
 				Mask: net.IPv4Mask(255, 255, 255, 0),
@@ -510,7 +562,7 @@ func TestIntegrationCertificateInUse(t *testing.T) {
 
 	// Step 3: Update the certificate (should handle the in-use certificate gracefully)
 	s.CertId = initialCertId // Set the existing cert ID to simulate an update
-	
+
 	c2 := &tlssecret.Certificate{
 		SecretName:  "test-cert",
 		Namespace:   "test",
@@ -528,7 +580,7 @@ func TestIntegrationCertificateInUse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to parse updated cert ID: %v", err)
 	}
-	
+
 	// The implementation should have created a new certificate with a modified name
 	if updatedCertId == initialCertId {
 		t.Error("Expected a new certificate ID after update, but got the same ID")
@@ -562,7 +614,7 @@ func TestIntegrationCertificateInUse(t *testing.T) {
 				}
 			}
 		}
-		
+
 		// Try to clean up the old certificate (may fail if still in use)
 		cert, _, err := client.Certificate.GetByID(ctx, initialCertId)
 		if err == nil && cert != nil {
@@ -627,7 +679,7 @@ func TestIntegrationCertificateUpdate(t *testing.T) {
 
 	// Update the certificate (should delete old and create new with same name)
 	s.CertId = initialCertId
-	
+
 	c2 := &tlssecret.Certificate{
 		SecretName:  "test-cert",
 		Namespace:   "test",

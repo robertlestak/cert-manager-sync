@@ -16,7 +16,10 @@ import (
 	"time"
 
 	"github.com/digitalocean/godo"
+	"github.com/robertlestak/cert-manager-sync/pkg/state"
+	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
 	"github.com/stretchr/testify/assert"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 // GenerateKey generates an ECDSA private key.
@@ -91,6 +94,55 @@ func TestDigitalOceanDelete_RequiresSecretNameWhenCertIdSet(t *testing.T) {
 	s := &DigitalOceanStore{CertId: "abc"}
 	err := s.Delete(context.Background())
 	assert.Error(t, err)
+}
+
+func TestDigitalOceanSyncSecretNamespaceDefaulting(t *testing.T) {
+	oldClient := state.KubeClient
+	state.KubeClient = fake.NewSimpleClientset()
+	t.Cleanup(func() { state.KubeClient = oldClient })
+
+	cases := []struct {
+		name        string
+		secretName  string
+		wantName    string
+		wantNS      string
+		errContains string
+	}{
+		{
+			name:        "defaults plain secret name",
+			secretName:  "do-creds",
+			wantName:    "do-creds",
+			wantNS:      "cert-manager",
+			errContains: "cert-manager/do-creds",
+		},
+		{
+			name:        "preserves namespaced secret name",
+			secretName:  "shared/do-creds",
+			wantName:    "do-creds",
+			wantNS:      "shared",
+			errContains: "shared/do-creds",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &DigitalOceanStore{}
+			err := s.FromConfig(tlssecret.GenericSecretSyncConfig{
+				Config: map[string]string{"secret-name": tc.secretName},
+			})
+			assert.NoError(t, err)
+
+			_, err = s.Sync(&tlssecret.Certificate{
+				SecretName: "source",
+				Namespace:  "cert-manager",
+			})
+
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), tc.errContains)
+			assert.Equal(t, tc.wantName, s.SecretName)
+			assert.Equal(t, tc.wantNS, s.SecretNamespace)
+		})
+	}
 }
 
 func TestSeparateCertsDO(t *testing.T) {
