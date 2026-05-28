@@ -271,18 +271,11 @@ func HandleSecret(s *corev1.Secret) error {
 		delete(patchAnnotations, state.OperatorName+"/failed-sync-attempts")
 		// remove the next-retry annotation
 		delete(patchAnnotations, state.OperatorName+"/next-retry")
-		// Cache the hash of the annotation set we are about to persist, not the
-		// pre-sync secret. Stores hand back annotations (e.g. cloudflare-cert-id)
-		// via AnnotationUpdates that are written in this same patch; those keys
-		// are operator-prefixed and therefore counted by HashSecret. Hashing the
-		// original secret would omit them, so the next reconcile would compute a
-		// different hash, see the cache as changed, and re-sync in a tight loop —
-		// each pass minting a new remote certificate (issue #51: Cloudflare IP
-		// quota exhaustion). Backoff cannot stop this because it only governs
-		// failed syncs, and these syncs succeed.
-		hashSrc := s.DeepCopy()
-		hashSrc.Annotations = patchAnnotations
-		patchAnnotations[state.OperatorName+"/hash"] = state.HashSecret(hashSrc)
+		// the sync was a success, add the secret to the cache. Store write-back
+		// annotations handed back in this same patch (e.g. cloudflare-cert-id)
+		// are excluded from HashSecret, so hashing the pre-write-back secret here
+		// is equivalent and does not trigger a spurious re-sync. See issue #51.
+		patchAnnotations[state.OperatorName+"/hash"] = state.HashSecret(s)
 	}
 	l.WithField("patchAnnotations", patchAnnotations).Debug("patchAnnotations")
 	// patch the secret with the updated annotations
