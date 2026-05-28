@@ -66,6 +66,45 @@ func TestHandleSecret_CachesWriteBackAnnotations_NoResyncLoop(t *testing.T) {
 	assert.Equal(t, 1, stub.syncCnt, "stable secret must not trigger a re-sync")
 }
 
+// TestHandleSecret_ExternalRevertOfWriteBack_NoResyncLoop reproduces the
+// GitOps ping-pong from issue #51: a tool like ArgoCD owns the secret manifest
+// and keeps resetting the operator's write-back annotation (cloudflare-cert-id)
+// to "". The operator fills it on sync, the tool reverts it, and pre-fix the
+// operator treated each revert as a material change -- re-syncing and, because
+// an empty cert-id takes the create path, minting a new remote certificate every
+// pass until the provider quota is exhausted. The fix excludes managed write-back
+// annotations from the cache hash, so external churn on them never re-syncs.
+func TestHandleSecret_ExternalRevertOfWriteBack_NoResyncLoop(t *testing.T) {
+	clearDeleteEnv(t)
+	t.Setenv("CACHE_DISABLE", "")
+
+	s := makeSecret("tls", "ns", map[string]string{
+		state.OperatorName + "/sync-enabled":           "true",
+		state.OperatorName + "/cloudflare-zone-id":     "zone123",
+		state.OperatorName + "/cloudflare-secret-name": "cf-creds",
+	}, nil)
+	s.Data = map[string][]byte{
+		"tls.crt": []byte("cert"),
+		"tls.key": []byte("key"),
+	}
+
+	cs := withFakeClientset(t, s)
+	withFakeKubeClient(t, cs)
+
+	stub := &fakeStore{syncUpdates: map[string]string{"cert-id": "abc123"}}
+	registerStubStore(t, map[string]RemoteStore{"cloudflare": stub})
+
+	require.NoError(t, HandleSecret(s))
+	assert.Equal(t, 1, stub.syncCnt, "first reconcile should sync once")
+
+	// Simulate the GitOps tool reverting the operator's write-back to "" on the
+	// persisted object, then reconcile that state.
+	reverted := mustGetSecret(t, cs, "ns", "tls")
+	reverted.Annotations[state.OperatorName+"/cloudflare-cert-id"] = ""
+	require.NoError(t, HandleSecret(reverted))
+	assert.Equal(t, 1, stub.syncCnt, "external revert of a write-back annotation must not re-sync")
+}
+
 func mustGetSecret(t *testing.T, cs *fake.Clientset, ns, name string) *corev1.Secret {
 	t.Helper()
 	got, err := cs.CoreV1().Secrets(ns).Get(context.Background(), name, metav1.GetOptions{})

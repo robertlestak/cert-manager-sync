@@ -7,8 +7,10 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
+	cmtypes "github.com/robertlestak/cert-manager-sync/internal/types"
 	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
@@ -97,6 +99,16 @@ func HashSecret(s *corev1.Secret) string {
 			OperatorName + "/next-delete":
 			delete(annotationsMap, k)
 		}
+		// remove operator-managed write-back annotations (the remote resource id
+		// the operator records after a successful sync, e.g. cloudflare-cert-id).
+		// These are operator output, not user input. Hashing them lets an
+		// external actor that rewrites or clears the annotation -- e.g. a GitOps
+		// tool that owns the secret manifest and resets cert-id to "" -- look
+		// like a material change, triggering an endless re-sync that mints a new
+		// remote certificate each pass. See issue #51.
+		if isManagedOutputAnnotation(k) {
+			delete(annotationsMap, k)
+		}
 	}
 	jd, err = json.Marshal(annotationsMap)
 	if err != nil {
@@ -118,6 +130,33 @@ func HashSecret(s *corev1.Secret) string {
 	hash := sha256.Sum256([]byte(secretHash))
 	secretHash = hex.EncodeToString(hash[:])
 	return secretHash
+}
+
+// isManagedOutputAnnotation reports whether k is an operator-managed write-back
+// annotation of the form "<operator>/<store>-<key>" (optionally suffixed with a
+// ".<index>" for multi-config secrets) where <store>/<key> is a known managed
+// output key. These annotations are operator output and are excluded from the
+// secret cache hash. See the comment in HashSecret and issue #51.
+func isManagedOutputAnnotation(k string) bool {
+	prefix := OperatorName + "/"
+	if !strings.HasPrefix(k, prefix) {
+		return false
+	}
+	rest := strings.TrimPrefix(k, prefix)
+	// strip an optional ".<index>" suffix used to disambiguate multiple configs
+	// for the same store (e.g. cloudflare-cert-id.0).
+	if i := strings.LastIndex(rest, "."); i != -1 {
+		if _, err := strconv.Atoi(rest[i+1:]); err == nil {
+			rest = rest[:i]
+		}
+	}
+	// the store name is the segment before the first '-'; the remainder is the
+	// config key (which may itself contain '-', e.g. certificate-arn).
+	dash := strings.Index(rest, "-")
+	if dash == -1 {
+		return false
+	}
+	return cmtypes.IsManagedOutputKey(rest[:dash], rest[dash+1:])
 }
 
 func cmsHash(s *corev1.Secret) string {

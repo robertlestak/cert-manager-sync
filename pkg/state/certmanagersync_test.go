@@ -101,6 +101,58 @@ func TestHashSecretIgnoresInternalBookkeepingAnnotations(t *testing.T) {
 	}
 }
 
+// TestHashSecretIgnoresManagedOutputAnnotations verifies that operator-managed
+// write-back annotations (the remote resource id recorded after a sync) are
+// excluded from the secret hash. If they were included, an external actor that
+// rewrites or clears them -- e.g. a GitOps tool that owns the manifest and
+// resets cert-id to "" -- would look like a material change and trigger an
+// endless re-sync that mints a new remote certificate each pass. See issue #51.
+func TestHashSecretIgnoresManagedOutputAnnotations(t *testing.T) {
+	base := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-secret",
+			Namespace: "default",
+			Annotations: map[string]string{
+				OperatorName + "/sync-enabled": "true",
+				OperatorName + "/acm-region":   "us-east-1",
+			},
+		},
+		Data: map[string][]byte{
+			"data-key": []byte("data-value"),
+		},
+	}
+	baseHash := HashSecret(base)
+
+	managed := []string{
+		"/acm-certificate-arn",
+		"/cloudflare-cert-id",
+		"/cloudflare-cert-id.0", // indexed multi-config variant
+		"/digitalocean-cert-id",
+		"/gcp-certificate-name",
+		"/heroku-cert-name",
+		"/hetznercloud-cert-id",
+	}
+	for _, key := range managed {
+		t.Run(key, func(t *testing.T) {
+			// Present with a value, then cleared to "" -- both must hash the same
+			// as the base (the ArgoCD ping-pong scenario).
+			withVal := base.DeepCopy()
+			withVal.Annotations[OperatorName+key] = "some-remote-id"
+			assert.Equal(t, baseHash, HashSecret(withVal), "managed output %s must not affect hash", key)
+
+			emptied := base.DeepCopy()
+			emptied.Annotations[OperatorName+key] = ""
+			assert.Equal(t, baseHash, HashSecret(emptied), "cleared managed output %s must not affect hash", key)
+		})
+	}
+
+	// Sanity: a non-managed store annotation (user config) MUST still affect the
+	// hash, otherwise a real config change would be silently ignored.
+	cfg := base.DeepCopy()
+	cfg.Annotations[OperatorName+"/cloudflare-zone-id"] = "zone123"
+	assert.NotEqual(t, baseHash, HashSecret(cfg), "user config annotation must affect hash")
+}
+
 // TestCmsHash checks if cmsHash correctly extracts the hash from the secret's annotations
 func TestCmsHash(t *testing.T) {
 	hash := cmsHash(mockSecret)
