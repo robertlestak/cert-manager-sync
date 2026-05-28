@@ -215,7 +215,7 @@ func HandleSecret(s *corev1.Secret) error {
 			"store": sync.Store,
 		})
 		ll.Debugf("syncing to store %s", sync.Store)
-		rs, err := NewStore(cmtypes.StoreType(sync.Store))
+		rs, err := newStoreFn(sync.Store)
 		if err != nil {
 			ll.WithError(err).Errorf("failed to initialize store %s: %v", sync.Store, err)
 			metrics.SetFailure(s.Namespace, s.Name, sync.Store)
@@ -271,8 +271,18 @@ func HandleSecret(s *corev1.Secret) error {
 		delete(patchAnnotations, state.OperatorName+"/failed-sync-attempts")
 		// remove the next-retry annotation
 		delete(patchAnnotations, state.OperatorName+"/next-retry")
-		// the sync was a success, add the secret to the cache
-		patchAnnotations[state.OperatorName+"/hash"] = state.HashSecret(s)
+		// Cache the hash of the annotation set we are about to persist, not the
+		// pre-sync secret. Stores hand back annotations (e.g. cloudflare-cert-id)
+		// via AnnotationUpdates that are written in this same patch; those keys
+		// are operator-prefixed and therefore counted by HashSecret. Hashing the
+		// original secret would omit them, so the next reconcile would compute a
+		// different hash, see the cache as changed, and re-sync in a tight loop —
+		// each pass minting a new remote certificate (issue #51: Cloudflare IP
+		// quota exhaustion). Backoff cannot stop this because it only governs
+		// failed syncs, and these syncs succeed.
+		hashSrc := s.DeepCopy()
+		hashSrc.Annotations = patchAnnotations
+		patchAnnotations[state.OperatorName+"/hash"] = state.HashSecret(hashSrc)
 	}
 	l.WithField("patchAnnotations", patchAnnotations).Debug("patchAnnotations")
 	// patch the secret with the updated annotations

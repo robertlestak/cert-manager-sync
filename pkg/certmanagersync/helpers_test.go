@@ -8,16 +8,17 @@ import (
 
 // fakeStore is a test double satisfying both RemoteStore and DeletableRemoteStore.
 type fakeStore struct {
-	syncErr   error
-	deleteErr error
-	syncCnt   int
-	deleteCnt int
-	gotConfig tlssecret.GenericSecretSyncConfig
+	syncErr     error
+	deleteErr   error
+	syncCnt     int
+	deleteCnt   int
+	gotConfig   tlssecret.GenericSecretSyncConfig
+	syncUpdates map[string]string
 }
 
 func (f *fakeStore) Sync(_ *tlssecret.Certificate) (map[string]string, error) {
 	f.syncCnt++
-	return nil, f.syncErr
+	return f.syncUpdates, f.syncErr
 }
 
 func (f *fakeStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error {
