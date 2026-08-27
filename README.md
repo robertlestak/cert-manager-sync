@@ -79,7 +79,45 @@ Annotations:
     cert-manager-sync.lestak.sh/acm-region: "" # Region to use. If not set, will use AWS_REGION env var, or us-east-1 if not set
     cert-manager-sync.lestak.sh/acm-certificate-arn: "" # will be auto-filled by operator for in-place renewals
     cert-manager-sync.lestak.sh/acm-secret-name: "" # (optional if not using IRSA) secret in same namespace which contains the aws credentials. If provided in format "namespace/secret-name", will look in that namespace for the secret
+    cert-manager-sync.lestak.sh/acm-adopt-existing: "false" # reuse an already-imported certificate tagged for this secret instead of importing a new one. See "Adopting an existing ACM certificate"
 ```
+
+#### Adopting an existing ACM certificate
+
+"We have no recorded ARN" and "no certificate exists in ACM for this secret"
+are not the same thing. A secret restored from backup, a GitOps tool that
+strips the `acm-certificate-arn` annotation, or a cluster rebuilt against the
+same AWS account all leave a working ACM certificate behind with nothing
+pointing at it. Importing without an ARN in those cases mints a duplicate and
+orphans the original — never `InUse`, never cleaned up, and counted against
+the account's rolling 365-day import quota.
+
+The operator tags every certificate it imports with
+`cert-manager-sync.lestak.sh/secret-name = <namespace>/<secret>`. With adoption
+enabled, a sync that has no recorded ARN looks for that tag first and updates
+the certificate it finds, in place:
+
+```yaml
+    cert-manager-sync.lestak.sh/acm-adopt-existing: "true"
+```
+
+Or cluster-wide with `ACM_ADOPT_EXISTING=true`; the annotation wins where both
+are set.
+
+**Adoption is opt-in, and should stay off if two clusters sync same-named
+secrets into one AWS account.** Their tags are identical, so each cluster would
+adopt and overwrite the other's certificate — worse than the duplicates it
+prevents. Enable it only where the tag is unambiguous within the account.
+
+Adoption needs `acm:ListCertificates` and `acm:ListTagsForCertificate` on top
+of `acm:ImportCertificate` (both covered by the `acm:*` policy above). If
+either is denied, the operator logs a warning and imports normally rather than
+failing the sync.
+
+If more than one certificate carries the tag, the operator adopts the one in
+use — preferring the most recently imported when none are — and logs the other
+ARNs as needing manual cleanup. **Nothing here deletes certificates**;
+duplicates that already exist are yours to remove.
 
 ### Cloudflare
 
@@ -644,6 +682,7 @@ LEADER_ELECTION_LOCK_NAME=cert-manager-sync-leader # Name of the Lease resource.
 LEADER_ELECTION_LEASE_DURATION=15s # How long a lease is honored before another replica may claim it.
 LEADER_ELECTION_RENEW_DEADLINE=10s # How long the leader keeps trying to renew before giving up leadership.
 LEADER_ELECTION_RETRY_PERIOD=2s # How often candidates retry. Must satisfy leaseDuration > renewDeadline > retryPeriod.
+ACM_ADOPT_EXISTING=false # Cluster-wide default for reusing an existing tagged ACM certificate instead of importing a new one. Per-secret acm-adopt-existing annotation overrides.
 ```
 
 If deploying with helm, these are exposed as values in the `values.yaml` file.
@@ -660,6 +699,7 @@ config:
   deletePolicy: "retain"
   maxDeleteAttempts: "10"
   deleteBlocking: "true"
+  acmAdoptExisting: "false"
 
 metrics:
   enabled: false

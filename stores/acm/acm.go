@@ -29,6 +29,24 @@ type ACMStore struct {
 	SecretNamespace string
 	AccessKeyId     string
 	SecretAccessKey string
+	// AdoptExisting opts this config in to reusing an already-imported ACM
+	// certificate carrying this secret's tag instead of importing a new one.
+	// See findAdoptableCertificate.
+	AdoptExisting *bool
+}
+
+// acmAPI is the subset of the ACM API the store uses. Declared as an interface
+// so the adoption and import paths can be exercised without AWS.
+type acmAPI interface {
+	ImportCertificate(*acm.ImportCertificateInput) (*acm.ImportCertificateOutput, error)
+	DeleteCertificate(*acm.DeleteCertificateInput) (*acm.DeleteCertificateOutput, error)
+	ListCertificatesPages(*acm.ListCertificatesInput, func(*acm.ListCertificatesOutput, bool) bool) error
+	ListTagsForCertificate(*acm.ListTagsForCertificateInput) (*acm.ListTagsForCertificateOutput, error)
+}
+
+// newACMClientFn builds the ACM client. Defined as a var so tests can inject a stub.
+var newACMClientFn = func(sess *session.Session, cfg *aws.Config) acmAPI {
+	return acm.New(sess, cfg)
 }
 
 func (s *ACMStore) GetApiKey(ctx context.Context) error {
@@ -92,14 +110,13 @@ func (s *ACMStore) createAWSSession() (*session.Session, *aws.Config, error) {
 }
 
 // importCertificate imports a cert into ACM
-func (s *ACMStore) importCertificate(sess *session.Session, cfg *aws.Config, im *acm.ImportCertificateInput) error {
+func (s *ACMStore) importCertificate(svc acmAPI, im *acm.ImportCertificateInput) error {
 	l := log.WithFields(
 		log.Fields{
 			"action": "importCertificate",
 		},
 	)
 	l.Debug("importCertificate")
-	svc := acm.New(sess, cfg)
 	if s.CertificateArn != "" {
 		im.CertificateArn = aws.String(s.CertificateArn)
 	}
@@ -110,28 +127,6 @@ func (s *ACMStore) importCertificate(sess *session.Session, cfg *aws.Config, im 
 	}
 	l.Debugf("awsacm.importCertificate svc.importCertificate success: %v\n", cert)
 	s.CertificateArn = *cert.CertificateArn
-	return nil
-}
-
-// replicateACMCert takes an ACM ImportCertificateInput and replicates it to AWS CertificateManager
-func (s *ACMStore) replicateACMCert(ai *acm.ImportCertificateInput) error {
-	l := log.WithFields(
-		log.Fields{
-			"action": "replicateACMCert",
-		},
-	)
-	l.Debug("replicateACMCert")
-	// inefficient creation of session on each import - can be cached
-	sess, cfg, serr := s.createAWSSession()
-	if serr != nil {
-		l.Debugf("createAWSSession error=%v", serr)
-		return serr
-	}
-	cerr := s.importCertificate(sess, cfg, ai)
-	if cerr != nil {
-		l.Debugf("ImportCertificate error=%v", cerr)
-		return cerr
-	}
 	return nil
 }
 
@@ -165,16 +160,10 @@ func (s *ACMStore) certToACMInput(c *tlssecret.Certificate) (*acm.ImportCertific
 	im := separateCertsACM(c.Ca, c.Certificate, c.Key)
 	if s.CertificateArn == "" {
 		// this is our first time sending to ACM, tag
-		var tags []*acm.Tag
-		secretTagName := c.SecretName
-		if c.Namespace != "" {
-			secretTagName = c.Namespace + "/" + c.SecretName
-		}
-		tags = append(tags, &acm.Tag{
-			Key:   aws.String(state.OperatorName + "/secret-name"),
-			Value: aws.String(secretTagName),
-		})
-		im.Tags = tags
+		im.Tags = []*acm.Tag{{
+			Key:   aws.String(secretTagKey()),
+			Value: aws.String(secretTagValue(c)),
+		}}
 	}
 	l.Debug("secretToACMInput")
 	return im, nil
@@ -199,6 +188,10 @@ func (s *ACMStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error {
 	}
 	if c.Config["secret-namespace"] != "" {
 		s.SecretNamespace = c.Config["secret-namespace"]
+	}
+	if v, ok := c.Config["adopt-existing"]; ok && v != "" {
+		b := strings.EqualFold(v, "true")
+		s.AdoptExisting = &b
 	}
 	if strings.Contains(s.SecretName, "/") {
 		s.SecretNamespace = strings.Split(s.SecretName, "/")[0]
@@ -237,7 +230,7 @@ func (s *ACMStore) Delete(_ context.Context) error {
 	if err != nil {
 		return fmt.Errorf("acm session: %w", err)
 	}
-	svc := acm.New(sess, cfg)
+	svc := newACMClientFn(sess, cfg)
 	if _, err := svc.DeleteCertificate(&acm.DeleteCertificateInput{
 		CertificateArn: aws.String(s.CertificateArn),
 	}); err != nil {
@@ -261,14 +254,26 @@ func (s *ACMStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
 	})
 	l.Debugf("Sync")
 	origArn := s.CertificateArn
+	sess, cfg, serr := s.createAWSSession()
+	if serr != nil {
+		l.WithError(serr).Errorf("createAWSSession error")
+		return nil, serr
+	}
+	svc := newACMClientFn(sess, cfg)
+	if s.CertificateArn == "" && s.adoptExisting() {
+		// No recorded ARN. Before minting a new certificate, check whether a
+		// previous run already imported one for this secret.
+		if arn := s.findAdoptableCertificate(svc, c); arn != "" {
+			s.CertificateArn = arn
+		}
+	}
 	im, err := s.certToACMInput(c)
 	if err != nil {
 		l.WithError(err).Errorf("certToACMInput error")
 		return nil, err
 	}
-	cerr := s.replicateACMCert(im)
-	if cerr != nil {
-		l.WithError(cerr).Errorf("replicateACMCert error")
+	if cerr := s.importCertificate(svc, im); cerr != nil {
+		l.WithError(cerr).Errorf("importCertificate error")
 		return nil, cerr
 	}
 	l = l.WithFields(log.Fields{

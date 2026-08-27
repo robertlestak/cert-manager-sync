@@ -33,6 +33,9 @@
     "config": {
       "type": "object",
       "properties": {
+        "acmAdoptExisting": {
+          "type": "string"
+        },
         "deleteBlocking": {
           "type": "string"
         },

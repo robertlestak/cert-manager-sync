@@ -35,6 +35,12 @@ config:
   # force-removed after maxDeleteAttempts so a misconfigured store cannot wedge
   # a secret; the remote certificate may then need manual cleanup.
   deleteBlocking: "true"
+  # Cluster-wide default for reusing an already-imported ACM certificate tagged
+  # for a secret instead of importing a new one. Leave "false" if two clusters
+  # sync same-named secrets into one AWS account -- their tags are identical and
+  # they would overwrite each other. See README "Adopting an existing ACM
+  # certificate". Per-secret acm-adopt-existing annotation overrides this.
+  acmAdoptExisting: "false"
 
 metrics:
   enabled: false

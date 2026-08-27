@@ -67,6 +67,8 @@ spec:
             value: "{{ .Values.config.maxDeleteAttempts }}"
           - name: DELETE_BLOCKING
             value: "{{ .Values.config.deleteBlocking }}"
+          - name: ACM_ADOPT_EXISTING
+            value: "{{ .Values.config.acmAdoptExisting | default "false" }}"
           - name: ENABLE_METRICS
             value: "{{ if and .Values.metrics .Values.metrics.enabled }}{{ .Values.metrics.enabled }}{{ else }}false{{ end }}"
           - name: METRICS_PORT
