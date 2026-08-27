@@ -4,6 +4,8 @@ import (
 	"cmp"
 	"context"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/robertlestak/cert-manager-sync/internal/metrics"
@@ -37,23 +39,22 @@ func init() {
 	}
 }
 
-func main() {
+// runController starts the secret informer and blocks until ctx is cancelled.
+//
+// Under leader election this is the OnStartedLeading callback, and ctx is
+// cancelled the moment leadership is lost — so a demoted replica stops
+// reconciling rather than racing the new leader.
+func runController(ctx context.Context) {
 	l := log.WithFields(
 		log.Fields{
-			"fn": "main",
+			"fn": "runController",
 		},
 	)
-	l.Info("starting cert-manager-sync")
-	if os.Getenv("ENABLE_METRICS") != "false" {
-		go metrics.Serve()
-	}
+	l.Info("starting secret informer")
 	factory := informers.NewSharedInformerFactory(state.KubeClient, 30*time.Second)
 	secretInformer := factory.Core().V1().Secrets().Informer()
 
-	stopper := make(chan struct{})
-	defer close(stopper)
-
-	secretInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	if _, err := secretInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			s, ok := obj.(*v1.Secret)
 			if !ok {
@@ -68,17 +69,54 @@ func main() {
 			}
 			reconcileSecret(l, s)
 		},
-	})
+	}); err != nil {
+		l.WithError(err).Fatal("failed to register secret event handler")
+	}
 
-	factory.Start(stopper)
+	factory.Start(ctx.Done())
 
 	// Wait for the caches to sync
-	if !cache.WaitForCacheSync(stopper, secretInformer.HasSynced) {
-		panic("Timed out waiting for caches to sync")
+	if !cache.WaitForCacheSync(ctx.Done(), secretInformer.HasSynced) {
+		l.Error("timed out waiting for caches to sync")
+		return
 	}
 
 	// Run the informer
-	<-stopper
+	<-ctx.Done()
+	l.Info("stopping secret informer")
+}
+
+func main() {
+	l := log.WithFields(
+		log.Fields{
+			"fn": "main",
+		},
+	)
+	l.Info("starting cert-manager-sync")
+	if os.Getenv("ENABLE_METRICS") != "false" {
+		// Metrics serve from every replica, leader or not, so scrape targets
+		// and probes do not flap on failover.
+		go metrics.Serve()
+	}
+
+	// SIGTERM must reach the leader elector, not just the process: with
+	// ReleaseOnCancel it hands the lease back immediately, so a rolling
+	// restart does not pause syncing for a full lease duration.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	if !leaderElectionEnabled() {
+		l.Warn("leader election disabled; run a single replica to avoid duplicate remote certificates")
+		runController(ctx)
+		return
+	}
+
+	if err := runWithLeaderElection(ctx, runController); err != nil {
+		// Exit non-zero so the pod restarts and re-contends rather than
+		// lingering as a healthy-looking replica that syncs nothing.
+		l.WithError(err).Error("leader election ended")
+		os.Exit(1)
+	}
 }
 
 // Function-typed indirection so reconcileSecret can be exercised without

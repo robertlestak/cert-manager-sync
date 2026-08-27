@@ -638,6 +638,12 @@ ENABLE_METRICS=true # Enable metrics server
 DELETE_POLICY=retain # Cluster-wide default for remote cert cleanup on secret deletion. "retain" (default) or "delete". Per-secret annotation overrides.
 MAX_DELETE_ATTEMPTS=10 # Maximum failed delete attempts. Only used when DELETE_BLOCKING=false. 0 means retry forever.
 DELETE_BLOCKING=true # When true (default), finalizers are never force-removed — secret deletion blocks until the remote delete succeeds (Kubernetes-idiomatic). Set to "false" to force-remove the finalizer after MAX_DELETE_ATTEMPTS.
+LEADER_ELECTION_ENABLED=true # Run only one active replica at a time. Enabled by default. Set to "false" only if you run a single replica and do not want to grant Lease RBAC.
+LEADER_ELECTION_NAMESPACE= # Namespace holding the Lease. Defaults to the pod's own namespace (POD_NAMESPACE, or the projected service account namespace).
+LEADER_ELECTION_LOCK_NAME=cert-manager-sync-leader # Name of the Lease resource.
+LEADER_ELECTION_LEASE_DURATION=15s # How long a lease is honored before another replica may claim it.
+LEADER_ELECTION_RENEW_DEADLINE=10s # How long the leader keeps trying to renew before giving up leadership.
+LEADER_ELECTION_RETRY_PERIOD=2s # How often candidates retry. Must satisfy leaseDuration > renewDeadline > retryPeriod.
 ```
 
 If deploying with helm, these are exposed as values in the `values.yaml` file.
@@ -658,7 +664,58 @@ config:
 metrics:
   enabled: false
   port: 9090
+
+leaderElection:
+  enabled: true
+  lockName: cert-manager-sync-leader
+  namespace: ""
+  leaseDuration: 15s
+  renewDeadline: 10s
+  retryPeriod: 2s
 ```
+
+## High Availability
+
+The operator's remote writes are not idempotent until the remote id has been
+written back to the secret. Two replicas that both observe a secret before
+either has recorded `acm-certificate-arn.N` (or `cloudflare-cert-id`, or any
+other write-back annotation) each take their store's *create* path: every
+renewal cycle mints one duplicate remote certificate per replica, one replica's
+write-back wins, and the rest are orphaned. Nothing ever cleans them up, and in
+ACM they count against the account's rolling 365-day import quota.
+
+Leader election prevents this. Only the leader runs the secret informer;
+the other replicas stay up, keep serving `/metrics`, and take over within one
+lease duration if the leader dies. It is **enabled by default**.
+
+```yaml
+replicaCount: 3
+
+leaderElection:
+  enabled: true
+```
+
+The leader holds a `Lease` in the release namespace, so the operator needs
+`get`, `create` and `update` on `coordination.k8s.io/leases` there. The chart
+creates that `Role` and `RoleBinding` whenever `clusterRole.create` is true. If
+you manage RBAC yourself, add it:
+
+```yaml
+apiGroups: ["coordination.k8s.io"]
+resources: ["leases"]
+verbs: ["get", "create", "update"]
+```
+
+If the permission is missing the operator exits at startup with a message
+naming the missing rule, rather than idling as a healthy-looking replica that
+syncs nothing.
+
+On `SIGTERM` the leader releases its lease immediately, so a rolling restart
+hands over in seconds instead of waiting out `leaseDuration`. A replica that
+loses leadership unexpectedly exits non-zero and re-contends on restart.
+
+To run without a Lease, set `leaderElection.enabled=false` — but then keep
+`replicaCount: 1`, since every replica will reconcile every secret.
 
 ## Monitoring
 

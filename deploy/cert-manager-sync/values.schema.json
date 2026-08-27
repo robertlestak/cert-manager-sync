@@ -1,161 +1,184 @@
 {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "type": "object",
-    "properties": {
-        "affinity": {
-            "type": "object"
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "affinity": {
+      "type": "object"
+    },
+    "autoscaling": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
         },
-        "autoscaling": {
-            "type": "object",
-            "properties": {
-                "enabled": {
-                    "type": "boolean"
-                },
-                "maxReplicas": {
-                    "type": "integer"
-                },
-                "minReplicas": {
-                    "type": "integer"
-                },
-                "targetCPUUtilizationPercentage": {
-                    "type": "integer"
-                }
-            }
+        "maxReplicas": {
+          "type": "integer"
         },
-        "clusterRole": {
-            "type": "object",
-            "properties": {
-                "create": {
-                    "type": "boolean"
-                }
-            }
+        "minReplicas": {
+          "type": "integer"
         },
-        "config": {
-            "type": "object",
-            "properties": {
-                "deleteBlocking": {
-                    "type": "string"
-                },
-                "deletePolicy": {
-                    "type": "string"
-                },
-                "disableCache": {
-                    "type": "string"
-                },
-                "disabledNamespaces": {
-                    "type": "string"
-                },
-                "enabledNamespaces": {
-                    "type": "string"
-                },
-                "logFormat": {
-                    "type": "string"
-                },
-                "logLevel": {
-                    "type": "string"
-                },
-                "maxDeleteAttempts": {
-                    "type": "string"
-                },
-                "operatorName": {
-                    "type": "string"
-                },
-                "secretsNamespace": {
-                    "type": "string"
-                }
-            }
-        },
-        "env": {
-            "type": "array"
-        },
-        "fullnameOverride": {
-            "type": "string"
-        },
-        "image": {
-            "type": "object",
-            "properties": {
-                "pullPolicy": {
-                    "type": "string"
-                },
-                "repository": {
-                    "type": "string"
-                },
-                "tag": {
-                    "type": "string"
-                }
-            }
-        },
-        "imagePullSecrets": {
-            "type": "array"
-        },
-        "metrics": {
-            "type": "object",
-            "properties": {
-                "enabled": {
-                    "type": "boolean"
-                },
-                "port": {
-                    "type": "integer"
-                }
-            }
-        },
-        "nameOverride": {
-            "type": "string"
-        },
-        "nodeSelector": {
-            "type": "object"
-        },
-        "podAnnotations": {
-            "type": "object"
-        },
-        "podDisruptionBudget": {
-            "type": "object",
-            "properties": {
-                "enabled": {
-                    "type": "boolean"
-                },
-                "maxUnavailable": {
-                    "type": "string"
-                },
-                "minAvailable": {
-                    "type": "integer"
-                }
-            }
-        },
-        "podSecurityContext": {
-            "type": "object"
-        },
-        "priorityClassName": {
-            "type": "string"
-        },
-        "replicaCount": {
-            "type": "integer"
-        },
-        "resources": {
-            "type": "object"
-        },
-        "securityContext": {
-            "type": "object"
-        },
-        "serviceAccount": {
-            "type": "object",
-            "properties": {
-                "annotations": {
-                    "type": "object"
-                },
-                "create": {
-                    "type": "boolean"
-                },
-                "name": {
-                    "type": "string"
-                }
-            }
-        },
-        "tolerations": {
-            "type": "array"
-        },
-        "topologySpreadConstraints": {
-            "type": "array"
+        "targetCPUUtilizationPercentage": {
+          "type": "integer"
         }
+      }
+    },
+    "clusterRole": {
+      "type": "object",
+      "properties": {
+        "create": {
+          "type": "boolean"
+        }
+      }
+    },
+    "config": {
+      "type": "object",
+      "properties": {
+        "deleteBlocking": {
+          "type": "string"
+        },
+        "deletePolicy": {
+          "type": "string"
+        },
+        "disableCache": {
+          "type": "string"
+        },
+        "disabledNamespaces": {
+          "type": "string"
+        },
+        "enabledNamespaces": {
+          "type": "string"
+        },
+        "logFormat": {
+          "type": "string"
+        },
+        "logLevel": {
+          "type": "string"
+        },
+        "maxDeleteAttempts": {
+          "type": "string"
+        },
+        "operatorName": {
+          "type": "string"
+        },
+        "secretsNamespace": {
+          "type": "string"
+        }
+      }
+    },
+    "env": {
+      "type": "array"
+    },
+    "fullnameOverride": {
+      "type": "string"
+    },
+    "image": {
+      "type": "object",
+      "properties": {
+        "pullPolicy": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string"
+        },
+        "tag": {
+          "type": "string"
+        }
+      }
+    },
+    "imagePullSecrets": {
+      "type": "array"
+    },
+    "leaderElection": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "lockName": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "leaseDuration": {
+          "type": "string"
+        },
+        "renewDeadline": {
+          "type": "string"
+        },
+        "retryPeriod": {
+          "type": "string"
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "port": {
+          "type": "integer"
+        }
+      }
+    },
+    "nameOverride": {
+      "type": "string"
+    },
+    "nodeSelector": {
+      "type": "object"
+    },
+    "podAnnotations": {
+      "type": "object"
+    },
+    "podDisruptionBudget": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "maxUnavailable": {
+          "type": "string"
+        },
+        "minAvailable": {
+          "type": "integer"
+        }
+      }
+    },
+    "podSecurityContext": {
+      "type": "object"
+    },
+    "priorityClassName": {
+      "type": "string"
+    },
+    "replicaCount": {
+      "type": "integer"
+    },
+    "resources": {
+      "type": "object"
+    },
+    "securityContext": {
+      "type": "object"
+    },
+    "serviceAccount": {
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "object"
+        },
+        "create": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        }
+      }
+    },
+    "tolerations": {
+      "type": "array"
+    },
+    "topologySpreadConstraints": {
+      "type": "array"
     }
+  }
 }

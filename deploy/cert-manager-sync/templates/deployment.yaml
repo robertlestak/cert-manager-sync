@@ -71,6 +71,37 @@ spec:
             value: "{{ if and .Values.metrics .Values.metrics.enabled }}{{ .Values.metrics.enabled }}{{ else }}false{{ end }}"
           - name: METRICS_PORT
             value: "{{ if and .Values.metrics .Values.metrics.port }}{{ .Values.metrics.port }}{{ else }}9090{{ end }}"
+          {{- $le := .Values.leaderElection | default dict }}
+          - name: LEADER_ELECTION_ENABLED
+            value: "{{ ne $le.enabled false }}"
+          {{- if ne $le.enabled false }}
+          - name: POD_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          - name: POD_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
+          {{- with $le.namespace }}
+          - name: LEADER_ELECTION_NAMESPACE
+            value: "{{ . }}"
+          {{- end }}
+          - name: LEADER_ELECTION_LOCK_NAME
+            value: "{{ $le.lockName | default "cert-manager-sync-leader" }}"
+          {{- with $le.leaseDuration }}
+          - name: LEADER_ELECTION_LEASE_DURATION
+            value: "{{ . }}"
+          {{- end }}
+          {{- with $le.renewDeadline }}
+          - name: LEADER_ELECTION_RENEW_DEADLINE
+            value: "{{ . }}"
+          {{- end }}
+          {{- with $le.retryPeriod }}
+          - name: LEADER_ELECTION_RETRY_PERIOD
+            value: "{{ . }}"
+          {{- end }}
+          {{- end }}
           {{- with .Values.env }}
           {{- toYaml . | nindent 10 }}
           {{- end }}

@@ -40,6 +40,25 @@ metrics:
   enabled: false
   port: 9090
 
+# Leader election. Only the leader runs the informer; other replicas stay up
+# and keep serving metrics. Enabled by default: without it, two replicas that
+# both observe a secret before either has written back its remote id each take
+# the store's *create* path, minting duplicate remote certificates (and burning
+# the ACM import quota). Disable only if you run a single replica and would
+# rather not grant the Lease RBAC below.
+leaderElection:
+  enabled: true
+  lockName: cert-manager-sync-leader
+  # Namespace holding the Lease. Defaults to the release namespace. If you point
+  # this elsewhere, that namespace needs its own Role for coordination.k8s.io
+  # leases -- the chart only creates one in the release namespace.
+  namespace: ""
+  # client-go requires leaseDuration > renewDeadline > retryPeriod. An
+  # inconsistent set is rejected at startup and the defaults are used instead.
+  leaseDuration: 15s
+  renewDeadline: 10s
+  retryPeriod: 2s
+
 serviceAccount:
   # Specifies whether a service account should be created
   create: true
