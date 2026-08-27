@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -44,7 +45,18 @@ func Serve() {
 		w.WriteHeader(http.StatusOK)
 	})
 	http.Handle("/metrics", promhttp.Handler())
-	if err := http.ListenAndServe(":"+port, nil); err != nil {
+	// Explicit timeouts: the default http.Server has none, so a client that
+	// opens a connection and never finishes its request holds a goroutine and
+	// an fd indefinitely. This listener is reachable from anything that can
+	// reach the pod.
+	srv := &http.Server{
+		Addr:              ":" + port,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	if err := srv.ListenAndServe(); err != nil {
 		l.WithError(err).Error("error starting http server")
 		os.Exit(1)
 	}
