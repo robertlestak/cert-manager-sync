@@ -187,6 +187,47 @@ func calculateNextRetryTime(secret *corev1.Secret) time.Time {
 	return nextRetryTime
 }
 
+// getSecretFn reads a secret from the API server. Defined as a var so tests can
+// swap in a fake.
+var getSecretFn = func(ctx context.Context, namespace, name string) (*corev1.Secret, error) {
+	return state.KubeClient.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{})
+}
+
+// freshSecret re-reads the secret from the API server so reconciliation never
+// runs against a stale informer snapshot.
+//
+// The shared informer hands the event handler a point-in-time copy of the
+// object. The operator's own writes -- the delete finalizer patch in
+// reconcileSecret, and the write-back annotation patch at the end of this
+// function -- are themselves watched updates, so the informer re-delivers
+// snapshots that were taken *before* those writes landed. Reconciling one of
+// those stale snapshots is not merely redundant: the store write-back
+// annotations (e.g. acm-certificate-arn.N) are missing from it, so
+// FromConfig finds no existing remote id and Sync takes its *create* path --
+// minting a second remote certificate and orphaning the one the secret's
+// annotations point at. See issue #52.
+//
+// A live Get is ordered after our own patch, so the refreshed object always
+// reflects it.
+func freshSecret(s *corev1.Secret) *corev1.Secret {
+	l := log.WithFields(log.Fields{
+		"action":    "freshSecret",
+		"namespace": s.Namespace,
+		"name":      s.Name,
+	})
+	live, err := getSecretFn(context.Background(), s.Namespace, s.Name)
+	if err != nil {
+		// Fall back to the delivered object; a transient read error should not
+		// stall the sync.
+		l.WithError(err).Debug("failed to refresh secret; using informer snapshot")
+		return s
+	}
+	if live == nil {
+		return s
+	}
+	return live
+}
+
 func HandleSecret(s *corev1.Secret) error {
 	l := log.WithFields(log.Fields{
 		"action":    "HandleSecret",
@@ -194,6 +235,8 @@ func HandleSecret(s *corev1.Secret) error {
 		"name":      s.Name,
 	})
 	l.Debugf("HandleSecret %s/%s", s.Namespace, s.Name)
+	// Cheap short-circuit on the delivered snapshot: if it already says there is
+	// nothing to do, there is nothing to confirm and we skip the extra read.
 	// ensure we haven't exceeded the allotted retries
 	if !readyToRetry(s) {
 		l.Debug("not ready to retry")
@@ -202,6 +245,23 @@ func HandleSecret(s *corev1.Secret) error {
 	// check if the secret has changed since last sync
 	if !state.CacheChanged(s) {
 		l.Debug("cache not changed")
+		return nil
+	}
+	// The snapshot claims work is needed. It may simply predate the operator's
+	// own write-back; confirm against the live object before touching any store.
+	// See freshSecret and issue #52.
+	s = freshSecret(s)
+	l = l.WithField("resourceVersion", s.ResourceVersion)
+	if !state.SecretWatched(s) || state.SecretDeletePending(s) {
+		l.Debug("secret no longer syncable")
+		return nil
+	}
+	if !readyToRetry(s) {
+		l.Debug("not ready to retry")
+		return nil
+	}
+	if !state.CacheChanged(s) {
+		l.Debug("cache not changed (stale snapshot)")
 		return nil
 	}
 	cert := tlssecret.ParseSecret(s)
