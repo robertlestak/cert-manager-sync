@@ -560,6 +560,7 @@ metadata:
     cert-manager-sync.lestak.sh/acm-region: "" # Region to use. If not set, will use AWS_REGION env var, or us-east-1 if not set
     cert-manager-sync.lestak.sh/acm-certificate-arn: "" # will be auto-filled by operator for in-place renewals
     cert-manager-sync.lestak.sh/acm-secret-name: "" # (optional if not using IRSA) secret in same namespace which contains the aws credentials. If provided in format "namespace/secret-name", will look in that namespace for the secret
+    cert-manager-sync.lestak.sh/acm-adopt-existing: "false" # reuse an already-imported certificate tagged for this secret instead of importing a new one
     cert-manager-sync.lestak.sh/cloudflare-enabled: "true" # sync certificate to Cloudflare
     cert-manager-sync.lestak.sh/cloudflare-secret-name: "example-cloudflare-secret" # secret in same namespace which contains the cloudflare api token. If provided in format "namespace/secret-name", will look in that namespace for the secret
     cert-manager-sync.lestak.sh/cloudflare-zone-id: "example-zone-id" # cloudflare zone id

@@ -1,6 +1,6 @@
 # cert-manager-sync
 
-![Version: 0.1.0](https://img.shields.io/badge/Version-0.1.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.0.0](https://img.shields.io/badge/AppVersion-1.0.0-informational?style=flat-square)
+![Version: 1.6.0](https://img.shields.io/badge/Version-1.6.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.6.0](https://img.shields.io/badge/AppVersion-1.6.0-informational?style=flat-square)
 
 A Helm chart for cert-manager-sync
 
@@ -14,8 +14,9 @@ A Helm chart for cert-manager-sync
 | autoscaling.minReplicas | int | `1` |  |
 | autoscaling.targetCPUUtilizationPercentage | int | `80` |  |
 | clusterRole.create | bool | `true` |  |
-| config.deleteBlocking | string | `"true"` | When `"true"` (default), finalizers are never force-removed — secret deletion blocks until the controller succeeds (Kubernetes-idiomatic). When `"false"`, the finalizer is force-removed after `maxDeleteAttempts` so a misconfigured store cannot wedge a secret; the remote certificate may then need manual cleanup. |
-| config.deletePolicy | string | `"retain"` | Cluster-wide default for cleaning up remote certificates when a watched secret is deleted. `"retain"` leaves remote state untouched; `"delete"` enables cleanup. Per-secret `cert-manager-sync.lestak.sh/delete-policy` annotation overrides. |
+| config.acmAdoptExisting | string | `"false"` | Cluster-wide default for reusing an already-imported ACM certificate tagged for a secret instead of importing a new one. Leave `"false"` if two clusters sync same-named secrets into one AWS account — their tags are identical and they would overwrite each other. See README "Adopting an existing ACM certificate". Per-secret `acm-adopt-existing` annotation overrides this. |
+| config.deleteBlocking | string | `"true"` | When `"true"` (default), finalizers are never force-removed on persistent delete failure — secret deletion blocks until the controller succeeds (Kubernetes-idiomatic finalizer behavior). When "false", the finalizer is force-removed after maxDeleteAttempts so a misconfigured store cannot wedge a secret; the remote certificate may then need manual cleanup. |
+| config.deletePolicy | string | `"retain"` | Cluster-wide default for cleaning up remote certificates when a watched secret is deleted. "retain" (default) leaves remote state untouched. "delete" enables cleanup for every watched secret unless the per-secret delete-policy annotation opts back out. See README "Cleaning up remote certificates on secret deletion". |
 | config.disableCache | string | `"false"` |  |
 | config.disabledNamespaces | string | `""` |  |
 | config.enabledNamespaces | string | `""` |  |
@@ -28,8 +29,14 @@ A Helm chart for cert-manager-sync
 | fullnameOverride | string | `""` |  |
 | image.pullPolicy | string | `"IfNotPresent"` |  |
 | image.repository | string | `"robertlestak/cert-manager-sync"` |  |
-| image.tag | string | `"latest"` |  |
+| image.tag | string | `""` |  |
 | imagePullSecrets | list | `[]` |  |
+| leaderElection.enabled | bool | `true` | Enable leader election. Required for `replicaCount` above 1. |
+| leaderElection.leaseDuration | string | `"15s"` | How long a lease is honored before another replica may claim it. client-go requires `leaseDuration` > `renewDeadline` > `retryPeriod`; an inconsistent set is rejected at startup and the defaults are used instead. |
+| leaderElection.lockName | string | `"cert-manager-sync-leader"` | Name of the `Lease` resource the replicas contend for. |
+| leaderElection.namespace | string | `""` | Namespace holding the Lease. Defaults to the release namespace. If you point this elsewhere, that namespace needs its own Role for `coordination.k8s.io` leases — the chart only creates one in the release namespace. |
+| leaderElection.renewDeadline | string | `"10s"` | How long the leader keeps trying to renew before giving up leadership. |
+| leaderElection.retryPeriod | string | `"2s"` | How often candidates retry. |
 | metrics.enabled | bool | `false` |  |
 | metrics.port | int | `9090` |  |
 | nameOverride | string | `""` |  |

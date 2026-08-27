@@ -22,24 +22,25 @@ config:
   logLevel: "info"
   logFormat: "json"
   disableCache: "false"
-  # Cluster-wide default for cleaning up remote certs on secret deletion.
+  # -- Cluster-wide default for cleaning up remote certificates when a watched secret is deleted.
   # "retain" (default) leaves remote state untouched. "delete" enables cleanup
   # for every watched secret unless the per-secret delete-policy annotation
   # opts back out. See README "Cleaning up remote certificates on secret deletion".
   deletePolicy: "retain"
-  # Maximum failed delete attempts before the operator gives up. 0 = retry forever.
+  # -- Maximum failed delete attempts before the operator gives up. `"0"` means retry forever.
   maxDeleteAttempts: "10"
-  # When "true" (default), finalizers are never force-removed on persistent
+  # -- When `"true"` (default), finalizers are never force-removed on persistent
   # delete failure — secret deletion blocks until the controller succeeds
   # (Kubernetes-idiomatic finalizer behavior). When "false", the finalizer is
   # force-removed after maxDeleteAttempts so a misconfigured store cannot wedge
   # a secret; the remote certificate may then need manual cleanup.
   deleteBlocking: "true"
-  # Cluster-wide default for reusing an already-imported ACM certificate tagged
-  # for a secret instead of importing a new one. Leave "false" if two clusters
-  # sync same-named secrets into one AWS account -- their tags are identical and
-  # they would overwrite each other. See README "Adopting an existing ACM
-  # certificate". Per-secret acm-adopt-existing annotation overrides this.
+  # -- Cluster-wide default for reusing an already-imported ACM certificate
+  # tagged for a secret instead of importing a new one. Leave `"false"` if two
+  # clusters sync same-named secrets into one AWS account — their tags are
+  # identical and they would overwrite each other. See README "Adopting an
+  # existing ACM certificate". Per-secret `acm-adopt-existing` annotation
+  # overrides this.
   acmAdoptExisting: "false"
 
 metrics:
@@ -53,16 +54,17 @@ metrics:
 # the ACM import quota). Disable only if you run a single replica and would
 # rather not grant the Lease RBAC below.
 leaderElection:
+  # -- Enable leader election. Required for `replicaCount` above 1.
   enabled: true
+  # -- Name of the `Lease` resource the replicas contend for.
   lockName: cert-manager-sync-leader
-  # Namespace holding the Lease. Defaults to the release namespace. If you point
-  # this elsewhere, that namespace needs its own Role for coordination.k8s.io
-  # leases -- the chart only creates one in the release namespace.
+  # -- Namespace holding the Lease. Defaults to the release namespace. If you point this elsewhere, that namespace needs its own Role for `coordination.k8s.io` leases — the chart only creates one in the release namespace.
   namespace: ""
-  # client-go requires leaseDuration > renewDeadline > retryPeriod. An
-  # inconsistent set is rejected at startup and the defaults are used instead.
+  # -- How long a lease is honored before another replica may claim it. client-go requires `leaseDuration` > `renewDeadline` > `retryPeriod`; an inconsistent set is rejected at startup and the defaults are used instead.
   leaseDuration: 15s
+  # -- How long the leader keeps trying to renew before giving up leadership.
   renewDeadline: 10s
+  # -- How often candidates retry.
   retryPeriod: 2s
 
 serviceAccount:
