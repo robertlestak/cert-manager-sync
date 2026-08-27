@@ -45,6 +45,26 @@ func (s *FilepathStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error {
 	return nil
 }
 
+const (
+	// certMode is used for the certificate and CA chain. Both are public.
+	certMode os.FileMode = 0644
+	// keyMode is used for the private key: owner-only. Anything wider hands the
+	// key to every user and every other container sharing the volume.
+	keyMode os.FileMode = 0600
+)
+
+// writeFile writes data to path with the given mode.
+//
+// os.WriteFile only applies mode when it *creates* the file, so an existing
+// key written by an older version at 0644 would keep those permissions
+// forever. The explicit Chmod tightens files already on disk.
+func writeFile(path string, data []byte, mode os.FileMode) error {
+	if err := os.WriteFile(path, data, mode); err != nil {
+		return err
+	}
+	return os.Chmod(path, mode)
+}
+
 func (s *FilepathStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
 	l := log.WithFields(log.Fields{
 		"action":          "Sync",
@@ -71,16 +91,16 @@ func (s *FilepathStore) Sync(c *tlssecret.Certificate) (map[string]string, error
 	l = l.WithFields(log.Fields{
 		"id": certPath,
 	})
-	if err := os.WriteFile(certPath, c.Certificate, 0644); err != nil {
+	if err := writeFile(certPath, c.Certificate, certMode); err != nil {
 		l.WithError(err).Errorf("sync error")
 		return nil, fmt.Errorf("failed to write certificate file to %s: %w", certPath, err)
 	}
-	if err := os.WriteFile(keyPath, c.Key, 0644); err != nil {
+	if err := writeFile(keyPath, c.Key, keyMode); err != nil {
 		l.WithError(err).Errorf("sync error")
 		return nil, fmt.Errorf("failed to write key file to %s: %w", keyPath, err)
 	}
 	if len(c.Ca) > 0 {
-		if err := os.WriteFile(caPath, c.Ca, 0644); err != nil {
+		if err := writeFile(caPath, c.Ca, certMode); err != nil {
 			l.WithError(err).Errorf("sync error")
 			return nil, fmt.Errorf("failed to write CA file to %s: %w", caPath, err)
 		}
