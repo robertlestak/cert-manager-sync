@@ -97,6 +97,15 @@
         "enabled": {
           "type": "boolean"
         },
+        "createRole": {
+          "type": "boolean"
+        },
+        "required": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "lockName": {
           "type": "string"
         },

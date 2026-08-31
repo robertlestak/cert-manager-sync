@@ -1,9 +1,15 @@
 {{- $le := .Values.leaderElection | default dict -}}
-{{- if and .Values.clusterRole.create (ne $le.enabled false) -}}
+{{- if and (ne $le.enabled false) (ne $le.createRole false) -}}
 {{/*
 The Lease lives in the release namespace, so this is a namespaced Role rather
 than part of the operator's ClusterRole. If leaderElection.namespace points the
 Lease somewhere else, that namespace needs an equivalent Role of its own.
+
+Gated on leaderElection, deliberately not on clusterRole.create: the two answer
+different questions. Tying the Lease Role to the cluster-scoped RBAC switch
+meant that anyone managing cluster RBAC outside the chart got the feature
+enabled with no permission to back it. Set leaderElection.createRole=false to
+opt out on purpose.
 */}}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role

@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/robertlestak/cert-manager-sync/internal/metrics"
 	"github.com/robertlestak/cert-manager-sync/pkg/state"
 	log "github.com/sirupsen/logrus"
+	authorizationv1 "k8s.io/api/authorization/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/leaderelection"
@@ -27,6 +29,14 @@ import (
 //
 // Only the leader runs the informer. Non-leaders stay up and keep serving
 // metrics so probes and scrape targets do not flap on failover.
+//
+// Election is gated on the environment being able to support it. The Lease
+// RBAC is new in 1.6.0, so an install that upgrades before its RBAC does would
+// otherwise crash-loop on a permission it never needed at one replica. A
+// process that cannot elect logs loudly, raises
+// cert_manager_sync_leader_election_degraded, and reconciles unelected —
+// unless LEADER_ELECTION_REQUIRED is set, which the chart does above one
+// replica, where unelected is not degraded but wrong.
 
 const (
 	defaultLockName      = "cert-manager-sync-leader"
@@ -44,6 +54,19 @@ const (
 // silent, expensive, and only visible in the provider's console.
 func leaderElectionEnabled() bool {
 	return !strings.EqualFold(os.Getenv("LEADER_ELECTION_ENABLED"), "false")
+}
+
+// leaderElectionRequired reports whether an environment that cannot support
+// leader election should be treated as fatal rather than degraded.
+//
+// Off by default, because a single replica that cannot hold a Lease is still
+// correct — it is the only writer either way, and refusing to start would take
+// certificate syncing down over a permission it does not need. Set it for
+// replicaCount > 1, where running unelected is not a degraded mode but the
+// duplicate-remote-certificate bug this feature exists to prevent; the chart
+// sets it automatically. See issue #48.
+func leaderElectionRequired() bool {
+	return strings.EqualFold(os.Getenv("LEADER_ELECTION_REQUIRED"), "true")
 }
 
 // leaderElectionNamespace resolves the namespace holding the Lease, in
@@ -115,23 +138,83 @@ func envDuration(key string, def time.Duration) time.Duration {
 	return d
 }
 
-// checkLeasePermissions fails fast when the operator cannot read the Lease it
-// is about to contend for.
+// leaseVerbs are what resourcelock.LeaseLock exercises over the lock's
+// lifetime. A candidate that can Get but not Update acquires nothing and
+// renews nothing, so all three have to be checked together.
+var leaseVerbs = []string{"get", "create", "update"}
+
+// checkLeaseCapability reports whether this environment can support leader
+// election, returning a descriptive error when it cannot.
 //
-// Without this, a missing RBAC rule is nearly invisible: leaderelection retries
-// the Forbidden response forever at retryPeriod, OnStartedLeading never fires,
-// and the operator sits there healthy-looking while syncing nothing. Crashing
-// with an actionable message is far kinder than a silent no-op.
-func checkLeasePermissions(ctx context.Context, namespace, name string) error {
+// This is a capability probe, not a health check. Leader election is a
+// cluster-side capability — it needs coordination.k8s.io Lease RBAC in the
+// pod's namespace — and an operator that was syncing certificates fine before
+// the feature existed must not stop syncing them because that RBAC has not
+// been applied yet. The caller degrades to running unelected (see
+// runWithLeaderElection) unless LEADER_ELECTION_REQUIRED says otherwise.
+//
+// SelfSubjectAccessReview asks the API server the question directly, and
+// covers create/update, which cannot be probed without actually writing. If
+// the review itself is unavailable, fall back to reading the Lease: it still
+// catches the common case of no rule at all.
+func checkLeaseCapability(ctx context.Context, namespace, name string) error {
+	for _, verb := range leaseVerbs {
+		review := &authorizationv1.SelfSubjectAccessReview{
+			Spec: authorizationv1.SelfSubjectAccessReviewSpec{
+				ResourceAttributes: &authorizationv1.ResourceAttributes{
+					Namespace: namespace,
+					Group:     "coordination.k8s.io",
+					Resource:  "leases",
+					Name:      name,
+					Verb:      verb,
+				},
+			},
+		}
+		res, err := state.KubeClient.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx, review, metav1.CreateOptions{})
+		if err != nil {
+			// The review is granted to every authenticated identity by
+			// system:basic-user, so this is an unusual cluster rather than a
+			// missing grant. Fall back rather than guess.
+			return checkLeaseAccessByRead(ctx, namespace, name)
+		}
+		if !res.Status.Allowed {
+			return fmt.Errorf("not allowed to %s Lease %s/%s: grant %s on coordination.k8s.io leases in that namespace: %s",
+				verb, namespace, name, strings.Join(leaseVerbs, "/"), cmp.Or(res.Status.Reason, "no matching RBAC rule"))
+		}
+	}
+	return nil
+}
+
+// checkLeaseAccessByRead is the fallback probe for clusters where
+// SelfSubjectAccessReview is unavailable. NotFound is the expected state
+// before the first election and means the read was authorized.
+func checkLeaseAccessByRead(ctx context.Context, namespace, name string) error {
 	_, err := state.KubeClient.CoordinationV1().Leases(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err == nil || apierrors.IsNotFound(err) {
-		// Not found is the expected state before the first election.
 		return nil
 	}
 	if apierrors.IsForbidden(err) {
-		return fmt.Errorf("no permission to read Lease %s/%s: grant get/create/update on coordination.k8s.io leases in that namespace, or set LEADER_ELECTION_ENABLED=false to run a single replica without election: %w", namespace, name, err)
+		return fmt.Errorf("no permission to read Lease %s/%s: grant %s on coordination.k8s.io leases in that namespace: %w",
+			namespace, name, strings.Join(leaseVerbs, "/"), err)
 	}
 	return fmt.Errorf("failed to read Lease %s/%s: %w", namespace, name, err)
+}
+
+// degradeOrFail decides what an environment that cannot elect means for this
+// process: run unelected (the default, so a missing Lease grant never costs
+// certificate syncing), or refuse to start (LEADER_ELECTION_REQUIRED, set by
+// the chart whenever more than one replica is asked for).
+func degradeOrFail(ctx context.Context, reason error, run func(context.Context)) error {
+	l := log.WithFields(log.Fields{"fn": "degradeOrFail"})
+	if leaderElectionRequired() {
+		return fmt.Errorf("leader election is required but unavailable: %w", reason)
+	}
+	metrics.SetLeaderElectionDegraded(true)
+	// Error, not Warn: this is silently load-bearing above one replica, and
+	// the metric alone is only visible where metrics are enabled.
+	l.WithError(reason).Error("leader election unavailable; reconciling without it — safe for a single replica, but every replica will reconcile every secret, which mints duplicate remote certificates. Grant the Lease RBAC, or set LEADER_ELECTION_ENABLED=false to silence this")
+	run(ctx)
+	return nil
 }
 
 // runWithLeaderElection blocks, running run() only while this process holds the
@@ -141,15 +224,16 @@ func runWithLeaderElection(ctx context.Context, run func(context.Context)) error
 
 	namespace, err := leaderElectionNamespace()
 	if err != nil {
-		return err
+		return degradeOrFail(ctx, err, run)
 	}
 	lockName := cmp.Or(os.Getenv("LEADER_ELECTION_LOCK_NAME"), defaultLockName)
 	identity := leaderElectionIdentity()
 	lease, renew, retry := leaderElectionTimings()
 
-	if err := checkLeasePermissions(ctx, namespace, lockName); err != nil {
-		return err
+	if err := checkLeaseCapability(ctx, namespace, lockName); err != nil {
+		return degradeOrFail(ctx, err, run)
 	}
+	metrics.SetLeaderElectionDegraded(false)
 
 	l.WithFields(log.Fields{
 		"namespace":     namespace,

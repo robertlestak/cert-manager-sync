@@ -111,6 +111,10 @@ func main() {
 		return
 	}
 
+	// An environment that cannot support election does not end up here: it is
+	// degraded to running unelected inside runWithLeaderElection, so a missing
+	// Lease grant never costs certificate syncing. What reaches this branch is
+	// a lost lease, or LEADER_ELECTION_REQUIRED with no way to satisfy it.
 	if err := runWithLeaderElection(ctx, runController); err != nil {
 		// Exit non-zero so the pod restarts and re-contends rather than
 		// lingering as a healthy-looking replica that syncs nothing.

@@ -56,6 +56,15 @@ metrics:
 leaderElection:
   # -- Enable leader election. Required for `replicaCount` above 1.
   enabled: true
+  # -- Create the namespaced `Role`/`RoleBinding` for the `Lease`. Set to
+  # `false` only if you manage that RBAC yourself — the operator needs
+  # `get`/`create`/`update` on `coordination.k8s.io` leases either way.
+  createRole: true
+  # -- Refuse to start when leader election is enabled but the `Lease` RBAC is
+  # missing, instead of reconciling unelected. Defaults to on whenever
+  # `replicaCount` is above 1, where running unelected mints duplicate remote
+  # certificates. Leave unset to follow `replicaCount`.
+  required: ~
   # -- Name of the `Lease` resource the replicas contend for.
   lockName: cert-manager-sync-leader
   # -- Namespace holding the Lease. Defaults to the release namespace. If you point this elsewhere, that namespace needs its own Role for `coordination.k8s.io` leases — the chart only creates one in the release namespace.

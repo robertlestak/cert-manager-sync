@@ -89,6 +89,12 @@ spec:
           - name: LEADER_ELECTION_NAMESPACE
             value: "{{ . }}"
           {{- end }}
+          # A single replica reconciling unelected is still the only writer, so
+          # a missing Lease grant degrades with a loud log rather than taking
+          # syncing down. Above one replica it is the duplicate-certificate bug
+          # this feature prevents, so there it is fatal.
+          - name: LEADER_ELECTION_REQUIRED
+            value: "{{ if kindIs "invalid" $le.required }}{{ gt (int .Values.replicaCount) 1 }}{{ else }}{{ $le.required }}{{ end }}"
           - name: LEADER_ELECTION_LOCK_NAME
             value: "{{ $le.lockName | default "cert-manager-sync-leader" }}"
           {{- with $le.leaseDuration }}

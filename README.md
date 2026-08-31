@@ -678,6 +678,7 @@ DELETE_POLICY=retain # Cluster-wide default for remote cert cleanup on secret de
 MAX_DELETE_ATTEMPTS=10 # Maximum failed delete attempts. Only used when DELETE_BLOCKING=false. 0 means retry forever.
 DELETE_BLOCKING=true # When true (default), finalizers are never force-removed — secret deletion blocks until the remote delete succeeds (Kubernetes-idiomatic). Set to "false" to force-remove the finalizer after MAX_DELETE_ATTEMPTS.
 LEADER_ELECTION_ENABLED=true # Run only one active replica at a time. Enabled by default. Set to "false" only if you run a single replica and do not want to grant Lease RBAC.
+LEADER_ELECTION_REQUIRED=false # Refuse to start when the Lease RBAC is missing, instead of reconciling unelected. Set this whenever more than one replica runs; the chart derives it from replicaCount.
 LEADER_ELECTION_NAMESPACE= # Namespace holding the Lease. Defaults to the pod's own namespace (POD_NAMESPACE, or the projected service account namespace).
 LEADER_ELECTION_LOCK_NAME=cert-manager-sync-leader # Name of the Lease resource.
 LEADER_ELECTION_LEASE_DURATION=15s # How long a lease is honored before another replica may claim it.
@@ -708,6 +709,8 @@ metrics:
 
 leaderElection:
   enabled: true
+  createRole: true
+  required: ~
   lockName: cert-manager-sync-leader
   namespace: ""
   leaseDuration: 15s
@@ -738,8 +741,8 @@ leaderElection:
 
 The leader holds a `Lease` in the release namespace, so the operator needs
 `get`, `create` and `update` on `coordination.k8s.io/leases` there. The chart
-creates that `Role` and `RoleBinding` whenever `clusterRole.create` is true. If
-you manage RBAC yourself, add it:
+creates that `Role` and `RoleBinding` unless you set
+`leaderElection.createRole=false`. If you manage RBAC yourself, add it:
 
 ```yaml
 apiGroups: ["coordination.k8s.io"]
@@ -747,9 +750,22 @@ resources: ["leases"]
 verbs: ["get", "create", "update"]
 ```
 
-If the permission is missing the operator exits at startup with a message
-naming the missing rule, rather than idling as a healthy-looking replica that
-syncs nothing.
+**Election is gated on the cluster being able to support it.** The Lease RBAC
+is new in 1.6.0, and an install whose RBAC lags the image must not stop syncing
+certificates over a permission it did not previously need. At startup the
+operator asks the API server (`SelfSubjectAccessReview`) whether it may
+`get`/`create`/`update` the Lease:
+
+| | |
+|---|---|
+| Allowed | Elects normally. |
+| Not allowed, `replicaCount: 1` | Logs an error, sets `cert_manager_sync_leader_election_degraded` to `1`, and reconciles unelected — which is correct for a single writer. |
+| Not allowed, `replicaCount > 1` | Refuses to start. Unelected replicas is the duplicate-certificate bug above, not a degraded mode. |
+
+The last row is `leaderElection.required`, which the chart derives from
+`replicaCount`; set it explicitly to override. Alert on the degraded gauge —
+`get` without `update` is checked too, so the operator will not sit there
+contending for a lease it can never acquire.
 
 On `SIGTERM` the leader releases its lease immediately, so a rolling restart
 hands over in seconds instead of waiting out `leaseDuration`. A replica that

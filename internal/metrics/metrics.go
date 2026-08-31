@@ -16,10 +16,21 @@ var (
 		Name: "cert_manager_sync_status",
 		Help: "cert-manager-sync status by namespace, secret, and store",
 	}, []string{"namespace", "secret", "store", "status"})
+
+	// LeaderElectionDegraded is 1 when leader election was asked for but the
+	// environment cannot support it (no coordination.k8s.io Lease RBAC in the
+	// pod's namespace), so this replica reconciles unelected. Harmless at one
+	// replica; above one it is the duplicate-remote-certificate bug. Alert on
+	// it rather than discovering it in the provider's console.
+	LeaderElectionDegraded = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "cert_manager_sync_leader_election_degraded",
+		Help: "1 when leader election was requested but is unavailable and the replica reconciles unelected",
+	})
 )
 
 func InitMetrics() {
 	prometheus.MustRegister(SyncStatus)
+	prometheus.MustRegister(LeaderElectionDegraded)
 }
 
 func SetSuccess(namespace, secret, store string) {
@@ -28,6 +39,14 @@ func SetSuccess(namespace, secret, store string) {
 
 func SetFailure(namespace, secret, store string) {
 	SyncStatus.WithLabelValues(namespace, secret, store, "fail").Set(1)
+}
+
+func SetLeaderElectionDegraded(degraded bool) {
+	if degraded {
+		LeaderElectionDegraded.Set(1)
+		return
+	}
+	LeaderElectionDegraded.Set(0)
 }
 
 func init() {

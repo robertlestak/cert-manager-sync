@@ -31,11 +31,13 @@ A Helm chart for cert-manager-sync
 | image.repository | string | `"robertlestak/cert-manager-sync"` |  |
 | image.tag | string | `""` |  |
 | imagePullSecrets | list | `[]` |  |
+| leaderElection.createRole | bool | `true` | Create the namespaced `Role`/`RoleBinding` for the `Lease`. Set to `false` only if you manage that RBAC yourself — the operator needs `get`/`create`/`update` on `coordination.k8s.io` leases either way. |
 | leaderElection.enabled | bool | `true` | Enable leader election. Required for `replicaCount` above 1. |
 | leaderElection.leaseDuration | string | `"15s"` | How long a lease is honored before another replica may claim it. client-go requires `leaseDuration` > `renewDeadline` > `retryPeriod`; an inconsistent set is rejected at startup and the defaults are used instead. |
 | leaderElection.lockName | string | `"cert-manager-sync-leader"` | Name of the `Lease` resource the replicas contend for. |
 | leaderElection.namespace | string | `""` | Namespace holding the Lease. Defaults to the release namespace. If you point this elsewhere, that namespace needs its own Role for `coordination.k8s.io` leases — the chart only creates one in the release namespace. |
 | leaderElection.renewDeadline | string | `"10s"` | How long the leader keeps trying to renew before giving up leadership. |
+| leaderElection.required | string | `nil` | Refuse to start when leader election is enabled but the `Lease` RBAC is missing, instead of reconciling unelected. Defaults to on whenever `replicaCount` is above 1, where running unelected mints duplicate remote certificates. Leave unset to follow `replicaCount`. |
 | leaderElection.retryPeriod | string | `"2s"` | How often candidates retry. |
 | metrics.enabled | bool | `false` |  |
 | metrics.port | int | `9090` |  |
