@@ -80,6 +80,24 @@ func certDomains(crt []byte) map[string]bool {
 	return domains
 }
 
+// adoptableKeyTypes is every key algorithm ACM recognizes.
+//
+// ListCertificates is not an unfiltered listing. With no Includes.KeyTypes, AWS
+// returns only RSA_1024 and RSA_2048 certificates, so an RSA_4096 or ECDSA
+// certificate is simply absent from the response -- indistinguishable, here,
+// from an account that holds nothing to adopt. Adoption then imported a
+// duplicate on every sync that had lost its ARN, which is the failure the
+// feature exists to prevent. See issue #53.
+//
+// There is no wildcard; the types have to be enumerated. Taking the list from
+// the SDK rather than writing it out keeps a future key type from reintroducing
+// the same silent miss on the next dependency bump. Narrowing it would buy
+// nothing: the tag is what decides adoption, and every candidate is tag-checked
+// regardless of how it was keyed.
+func adoptableKeyTypes() []*string {
+	return aws.StringSlice(acm.KeyAlgorithm_Values())
+}
+
 // findAdoptableCertificate returns the ARN of an existing ACM certificate
 // tagged for this secret, or "" if there is none.
 //
@@ -99,6 +117,7 @@ func (s *ACMStore) findAdoptableCertificate(svc acmAPI, c *tlssecret.Certificate
 	var candidates []*acm.CertificateSummary
 	err := svc.ListCertificatesPages(&acm.ListCertificatesInput{
 		MaxItems: aws.Int64(100),
+		Includes: &acm.Filters{KeyTypes: adoptableKeyTypes()},
 	}, func(page *acm.ListCertificatesOutput, _ bool) bool {
 		for _, sum := range page.CertificateSummaryList {
 			if sum == nil || sum.CertificateArn == nil {

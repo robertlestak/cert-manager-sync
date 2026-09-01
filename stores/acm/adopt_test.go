@@ -25,14 +25,41 @@ type stubACM struct {
 	imports   []*acm.ImportCertificateInput
 	newArn    string
 	listCalls int
+	listInput *acm.ListCertificatesInput
 }
 
-func (s *stubACM) ListCertificatesPages(_ *acm.ListCertificatesInput, fn func(*acm.ListCertificatesOutput, bool) bool) error {
+// visibleKeyTypes models ACM's server-side filtering. ListCertificates is not an
+// unfiltered listing: absent Includes.KeyTypes it returns only RSA_1024 and
+// RSA_2048, so a caller that does not ask sees an empty account rather than an
+// error. Reproducing that here is the whole point -- the previous stub replayed
+// its canned summaries whatever was asked, so issue #53 could not fail a test.
+func visibleKeyTypes(in *acm.ListCertificatesInput) map[string]bool {
+	want := []string{acm.KeyAlgorithmRsa1024, acm.KeyAlgorithmRsa2048}
+	if in != nil && in.Includes != nil && len(in.Includes.KeyTypes) > 0 {
+		want = aws.StringValueSlice(in.Includes.KeyTypes)
+	}
+	m := make(map[string]bool, len(want))
+	for _, k := range want {
+		m[k] = true
+	}
+	return m
+}
+
+func (s *stubACM) ListCertificatesPages(in *acm.ListCertificatesInput, fn func(*acm.ListCertificatesOutput, bool) bool) error {
 	s.listCalls++
+	s.listInput = in
 	if s.listErr != nil {
 		return s.listErr
 	}
-	fn(&acm.ListCertificatesOutput{CertificateSummaryList: s.summaries}, true)
+	visible := visibleKeyTypes(in)
+	var page []*acm.CertificateSummary
+	for _, sum := range s.summaries {
+		if !visible[aws.StringValue(sum.KeyAlgorithm)] {
+			continue
+		}
+		page = append(page, sum)
+	}
+	fn(&acm.ListCertificatesOutput{CertificateSummaryList: page}, true)
 	return nil
 }
 
@@ -87,7 +114,17 @@ func summary(arn, domain string, inUse bool, imported time.Time) *acm.Certificat
 		DomainName:     aws.String(domain),
 		InUse:          aws.Bool(inUse),
 		ImportedAt:     aws.Time(imported),
+		// RSA_2048 unless a test says otherwise: the one key type AWS's default
+		// listing filter would have returned anyway, so the surrounding cases
+		// keep testing what they were written to test.
+		KeyAlgorithm: aws.String(acm.KeyAlgorithmRsa2048),
 	}
+}
+
+// withKey places a certificate that AWS's default listing filter hides.
+func withKey(sum *acm.CertificateSummary, alg string) *acm.CertificateSummary {
+	sum.KeyAlgorithm = aws.String(alg)
+	return sum
 }
 
 func ourTag(namespace, name string) []*acm.Tag {
@@ -279,4 +316,65 @@ func TestSync_RecordedArnSkipsAdoption(t *testing.T) {
 	require.Len(t, stub.imports, 1)
 	assert.Equal(t, "arn:known", aws.StringValue(stub.imports[0].CertificateArn))
 	assert.Nil(t, updates, "an unchanged ARN needs no annotation write-back")
+}
+
+// A tagged certificate is ours to adopt however it was keyed. ACM's default
+// listing filter returns only RSA_1024 and RSA_2048, so before issue #53 every
+// other key type looked like an empty account and minted a duplicate.
+func TestFindAdoptableCertificate_EveryKeyType(t *testing.T) {
+	c := testCert(t, "cert-manager", "example")
+	old := time.Now().Add(-72 * time.Hour)
+
+	for _, alg := range acm.KeyAlgorithm_Values() {
+		t.Run(alg, func(t *testing.T) {
+			stub := &stubACM{
+				summaries: []*acm.CertificateSummary{
+					withKey(summary("arn:ours", "localhost", false, old), alg),
+				},
+				tags: map[string][]*acm.Tag{"arn:ours": ourTag("cert-manager", "example")},
+			}
+			s := &ACMStore{}
+			assert.Equal(t, "arn:ours", s.findAdoptableCertificate(stub, c),
+				"a certificate carrying our tag must be adoptable whatever its key algorithm")
+		})
+	}
+}
+
+func TestFindAdoptableCertificate_RequestsEveryKeyType(t *testing.T) {
+	c := testCert(t, "cert-manager", "example")
+	stub := &stubACM{}
+	s := &ACMStore{}
+	s.findAdoptableCertificate(stub, c)
+
+	require.NotNil(t, stub.listInput)
+	require.NotNil(t, stub.listInput.Includes,
+		"an unfiltered ListCertificates silently drops everything but RSA_1024/RSA_2048")
+	got := aws.StringValueSlice(stub.listInput.Includes.KeyTypes)
+	assert.Contains(t, got, acm.KeyAlgorithmRsa4096, "the key size that surfaced issue #53")
+	assert.Contains(t, got, acm.KeyAlgorithmRsa2048, "narrowing must not lose the default type either")
+	assert.ElementsMatch(t, acm.KeyAlgorithm_Values(), got,
+		"take the list from the SDK so a new key type cannot silently reintroduce the miss")
+}
+
+func TestSync_AdoptsCertificateHiddenByDefaultFilter(t *testing.T) {
+	t.Setenv("ACM_ADOPT_EXISTING", "true")
+	c := testCert(t, "cert-manager", "example")
+	stub := &stubACM{
+		summaries: []*acm.CertificateSummary{
+			withKey(summary("arn:existing", "localhost", true, time.Now()), acm.KeyAlgorithmRsa4096),
+		},
+		tags:   map[string][]*acm.Tag{"arn:existing": ourTag("cert-manager", "example")},
+		newArn: "arn:brand-new",
+	}
+	useStubACM(t, stub)
+
+	s := &ACMStore{}
+	updates, err := s.Sync(c)
+	require.NoError(t, err)
+
+	require.Len(t, stub.imports, 1)
+	assert.Equal(t, "arn:existing", aws.StringValue(stub.imports[0].CertificateArn),
+		"a 4096-bit certificate must be updated in place, not duplicated on every reconcile")
+	assert.Empty(t, stub.imports[0].Tags, "an adopted certificate is already tagged")
+	assert.Equal(t, map[string]string{"certificate-arn": "arn:existing"}, updates)
 }
