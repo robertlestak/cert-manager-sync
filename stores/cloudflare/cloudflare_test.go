@@ -64,6 +64,55 @@ func TestCloudflareFromConfigParsesNamespacedSecretName(t *testing.T) {
 	assert.Equal(t, "cert", s.CertId)
 }
 
+func TestCloudflareFromConfigParsesLeafOnly(t *testing.T) {
+	cases := []struct {
+		name    string
+		value   string
+		want    bool
+		wantErr bool
+	}{
+		{name: "true", value: "true", want: true},
+		{name: "false", value: "false", want: false},
+		{name: "unset defaults to false", value: "", want: false},
+		{name: "invalid value errors", value: "yes", wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &CloudflareStore{}
+			cfg := map[string]string{"zone-id": "zone"}
+			if tc.value != "" {
+				cfg["leaf-only"] = tc.value
+			}
+			err := s.FromConfig(tlssecret.GenericSecretSyncConfig{Config: cfg})
+			if tc.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, tc.want, s.LeafOnly)
+		})
+	}
+}
+
+func TestCloudflareCertificatePayload(t *testing.T) {
+	cert := &tlssecret.Certificate{
+		Certificate: []byte("leaf"),
+		Ca:          []byte("ca"),
+	}
+
+	t.Run("full chain by default", func(t *testing.T) {
+		s := &CloudflareStore{}
+		assert.Equal(t, cert.FullChain(), s.certificatePayload(cert))
+		assert.Contains(t, string(s.certificatePayload(cert)), "ca")
+	})
+
+	t.Run("leaf only when enabled", func(t *testing.T) {
+		s := &CloudflareStore{LeafOnly: true}
+		assert.Equal(t, cert.Certificate, s.certificatePayload(cert))
+		assert.NotContains(t, string(s.certificatePayload(cert)), "ca")
+	})
+}
+
 func TestCloudflareSetDefaultSecretNamespace(t *testing.T) {
 	t.Run("defaults when empty", func(t *testing.T) {
 		s := &CloudflareStore{}

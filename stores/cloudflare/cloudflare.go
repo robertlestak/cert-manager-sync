@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/cloudflare/cloudflare-go/v5"
@@ -21,6 +22,10 @@ type CloudflareStore struct {
 	ApiToken        string
 	ZoneId          string
 	CertId          string
+	// LeafOnly, when true, uploads only the leaf certificate to Cloudflare
+	// instead of the full chain (leaf + CA). Some CA bundles are rejected by
+	// Cloudflare's custom_certificates trust store validation.
+	LeafOnly bool
 }
 
 func (s *CloudflareStore) GetApiToken(ctx context.Context) error {
@@ -53,6 +58,13 @@ func (s *CloudflareStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error 
 	if c.Config["cert-id"] != "" {
 		s.CertId = c.Config["cert-id"]
 	}
+	if c.Config["leaf-only"] != "" {
+		leafOnly, err := strconv.ParseBool(c.Config["leaf-only"])
+		if err != nil {
+			return fmt.Errorf("invalid leaf-only value %q: %w", c.Config["leaf-only"], err)
+		}
+		s.LeafOnly = leafOnly
+	}
 	// if secret name is in the format of "namespace/secretname" then parse it
 	if strings.Contains(s.SecretName, "/") {
 		s.SecretNamespace = strings.Split(s.SecretName, "/")[0]
@@ -65,6 +77,16 @@ func (s *CloudflareStore) setDefaultSecretNamespace(namespace string) {
 	if s.SecretNamespace == "" {
 		s.SecretNamespace = namespace
 	}
+}
+
+// certificatePayload returns the certificate bytes to upload to Cloudflare.
+// When LeafOnly is set, the CA certificate is omitted so only the leaf
+// certificate is sent, avoiding Cloudflare trust-store bundling rejections.
+func (s *CloudflareStore) certificatePayload(c *tlssecret.Certificate) []byte {
+	if s.LeafOnly {
+		return c.Certificate
+	}
+	return c.FullChain()
 }
 
 func (s *CloudflareStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
@@ -89,11 +111,12 @@ func (s *CloudflareStore) Sync(c *tlssecret.Certificate) (map[string]string, err
 	origCertId := s.CertId
 	var cert *custom_certificates.CustomCertificate
 	var err error
+	certPayload := s.certificatePayload(c)
 	if s.CertId != "" {
 		// Update existing certificate
 		cert, err = client.CustomCertificates.Edit(ctx, s.CertId, custom_certificates.CustomCertificateEditParams{
 			ZoneID:      cloudflare.F(s.ZoneId),
-			Certificate: cloudflare.F(string(c.FullChain())),
+			Certificate: cloudflare.F(string(certPayload)),
 			PrivateKey:  cloudflare.F(string(c.Key)),
 		})
 		if err != nil {
@@ -104,7 +127,7 @@ func (s *CloudflareStore) Sync(c *tlssecret.Certificate) (map[string]string, err
 		// Create new certificate
 		cert, err = client.CustomCertificates.New(ctx, custom_certificates.CustomCertificateNewParams{
 			ZoneID:      cloudflare.F(s.ZoneId),
-			Certificate: cloudflare.F(string(c.FullChain())),
+			Certificate: cloudflare.F(string(certPayload)),
 			PrivateKey:  cloudflare.F(string(c.Key)),
 		})
 		if err != nil {
