@@ -138,6 +138,7 @@ Annotations:
     cert-manager-sync.lestak.sh/cloudflare-secret-name: "example-cloudflare-secret" # secret in same namespace which contains the cloudflare api token. If provided in format "namespace/secret-name", will look in that namespace for the secret
     cert-manager-sync.lestak.sh/cloudflare-zone-id: "example-zone-id" # cloudflare zone id
     cert-manager-sync.lestak.sh/cloudflare-cert-id: "" # will be auto-filled by operator for in-place renewals
+    cert-manager-sync.lestak.sh/cloudflare-leaf-only: "false" # when "true", uploads only the leaf certificate instead of the full chain (leaf + CA). Useful when Cloudflare rejects the CA bundle ("certificate chain cannot be bundled using Cloudflare's trust store").
 ```
 
 ### DigitalOcean
@@ -565,6 +566,7 @@ metadata:
     cert-manager-sync.lestak.sh/cloudflare-secret-name: "example-cloudflare-secret" # secret in same namespace which contains the cloudflare api token. If provided in format "namespace/secret-name", will look in that namespace for the secret
     cert-manager-sync.lestak.sh/cloudflare-zone-id: "example-zone-id" # cloudflare zone id
     cert-manager-sync.lestak.sh/cloudflare-cert-id: "" # will be auto-filled by operator for in-place renewals
+    cert-manager-sync.lestak.sh/cloudflare-leaf-only: "false" # when "true", uploads only the leaf certificate instead of the full chain (leaf + CA). Useful when Cloudflare rejects the CA bundle ("certificate chain cannot be bundled using Cloudflare's trust store").
     cert-manager-sync.lestak.sh/digitalocean-enabled: "true" # sync certificate to DigitalOcean
     cert-manager-sync.lestak.sh/digitalocean-secret-name: "example-digitalocean-secret" # secret in same namespace which contains the digitalocean api key. If provided in format "namespace/secret-name", will look in that namespace for the secret
     cert-manager-sync.lestak.sh/digitalocean-cert-name: "my-cert" # unique name to give your cert in DigitalOcean
