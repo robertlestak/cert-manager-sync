@@ -4,16 +4,27 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/cloudflare/cloudflare-go/v5"
 	"github.com/cloudflare/cloudflare-go/v5/custom_certificates"
 	"github.com/cloudflare/cloudflare-go/v5/option"
+	"github.com/cloudflare/cloudflare-go/v5/origin_tls_client_auth"
 	"github.com/robertlestak/cert-manager-sync/pkg/state"
 	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
 	log "github.com/sirupsen/logrus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+const (
+	// ModeCustomCertificate uploads an edge certificate served to visitors.
+	// Cloudflare must be able to bundle it against its own trust store, so the
+	// certificate has to chain to a publicly trusted CA.
+	ModeCustomCertificate = "custom-certificate"
+	// ModeOriginPull uploads an Authenticated Origin Pulls client certificate
+	// that Cloudflare presents to the origin. It takes the leaf and the private
+	// key only, and the issuing CA may be private.
+	ModeOriginPull = "origin-pull"
 )
 
 type CloudflareStore struct {
@@ -22,10 +33,9 @@ type CloudflareStore struct {
 	ApiToken        string
 	ZoneId          string
 	CertId          string
-	// LeafOnly, when true, uploads only the leaf certificate to Cloudflare
-	// instead of the full chain (leaf + CA). Some CA bundles are rejected by
-	// Cloudflare's custom_certificates trust store validation.
-	LeafOnly bool
+	// Mode selects which Cloudflare certificate store to sync to. An empty
+	// value means ModeCustomCertificate.
+	Mode string
 }
 
 func (s *CloudflareStore) GetApiToken(ctx context.Context) error {
@@ -58,12 +68,13 @@ func (s *CloudflareStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error 
 	if c.Config["cert-id"] != "" {
 		s.CertId = c.Config["cert-id"]
 	}
-	if c.Config["leaf-only"] != "" {
-		leafOnly, err := strconv.ParseBool(c.Config["leaf-only"])
-		if err != nil {
-			return fmt.Errorf("invalid leaf-only value %q: %w", c.Config["leaf-only"], err)
+	if c.Config["mode"] != "" {
+		switch c.Config["mode"] {
+		case ModeCustomCertificate, ModeOriginPull:
+			s.Mode = c.Config["mode"]
+		default:
+			return fmt.Errorf("invalid mode %q: must be %q or %q", c.Config["mode"], ModeCustomCertificate, ModeOriginPull)
 		}
-		s.LeafOnly = leafOnly
 	}
 	// if secret name is in the format of "namespace/secretname" then parse it
 	if strings.Contains(s.SecretName, "/") {
@@ -77,16 +88,6 @@ func (s *CloudflareStore) setDefaultSecretNamespace(namespace string) {
 	if s.SecretNamespace == "" {
 		s.SecretNamespace = namespace
 	}
-}
-
-// certificatePayload returns the certificate bytes to upload to Cloudflare.
-// When LeafOnly is set, the CA certificate is omitted so only the leaf
-// certificate is sent, avoiding Cloudflare trust-store bundling rejections.
-func (s *CloudflareStore) certificatePayload(c *tlssecret.Certificate) []byte {
-	if s.LeafOnly {
-		return c.Certificate
-	}
-	return c.FullChain()
 }
 
 func (s *CloudflareStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
@@ -109,34 +110,16 @@ func (s *CloudflareStore) Sync(c *tlssecret.Certificate) (map[string]string, err
 	client := cloudflare.NewClient(option.WithAPIToken(s.ApiToken))
 
 	origCertId := s.CertId
-	var cert *custom_certificates.CustomCertificate
 	var err error
-	certPayload := s.certificatePayload(c)
-	if s.CertId != "" {
-		// Update existing certificate
-		cert, err = client.CustomCertificates.Edit(ctx, s.CertId, custom_certificates.CustomCertificateEditParams{
-			ZoneID:      cloudflare.F(s.ZoneId),
-			Certificate: cloudflare.F(string(certPayload)),
-			PrivateKey:  cloudflare.F(string(c.Key)),
-		})
-		if err != nil {
-			l.WithError(err).Errorf("cloudflare.CustomCertificates.Edit error")
-			return nil, fmt.Errorf("failed to update certificate in Cloudflare (zone: %s, cert: %s): %w", s.ZoneId, s.CertId, err)
-		}
+	if s.Mode == ModeOriginPull {
+		err = s.syncOriginPull(ctx, client, c, l)
 	} else {
-		// Create new certificate
-		cert, err = client.CustomCertificates.New(ctx, custom_certificates.CustomCertificateNewParams{
-			ZoneID:      cloudflare.F(s.ZoneId),
-			Certificate: cloudflare.F(string(certPayload)),
-			PrivateKey:  cloudflare.F(string(c.Key)),
-		})
-		if err != nil {
-			l.WithError(err).Errorf("cloudflare.CustomCertificates.New error")
-			return nil, fmt.Errorf("failed to create certificate in Cloudflare (zone: %s): %w", s.ZoneId, err)
-		}
+		err = s.syncCustomCertificate(ctx, client, c, l)
 	}
-	s.CertId = cert.ID
-	l = l.WithField("id", cert.ID)
+	if err != nil {
+		return nil, err
+	}
+	l = l.WithField("id", s.CertId)
 	var newKeys map[string]string
 	if origCertId != s.CertId {
 		newKeys = map[string]string{
@@ -145,6 +128,67 @@ func (s *CloudflareStore) Sync(c *tlssecret.Certificate) (map[string]string, err
 	}
 	l.Info("certificate synced")
 	return newKeys, nil
+}
+
+// syncCustomCertificate uploads the full chain as an edge certificate,
+// updating in place when a cert-id was recorded by a previous sync.
+func (s *CloudflareStore) syncCustomCertificate(ctx context.Context, client *cloudflare.Client, c *tlssecret.Certificate, l *log.Entry) error {
+	var cert *custom_certificates.CustomCertificate
+	var err error
+	if s.CertId != "" {
+		// Update existing certificate
+		cert, err = client.CustomCertificates.Edit(ctx, s.CertId, custom_certificates.CustomCertificateEditParams{
+			ZoneID:      cloudflare.F(s.ZoneId),
+			Certificate: cloudflare.F(string(c.FullChain())),
+			PrivateKey:  cloudflare.F(string(c.Key)),
+		})
+		if err != nil {
+			l.WithError(err).Errorf("cloudflare.CustomCertificates.Edit error")
+			return fmt.Errorf("failed to update certificate in Cloudflare (zone: %s, cert: %s): %w", s.ZoneId, s.CertId, err)
+		}
+	} else {
+		// Create new certificate
+		cert, err = client.CustomCertificates.New(ctx, custom_certificates.CustomCertificateNewParams{
+			ZoneID:      cloudflare.F(s.ZoneId),
+			Certificate: cloudflare.F(string(c.FullChain())),
+			PrivateKey:  cloudflare.F(string(c.Key)),
+		})
+		if err != nil {
+			l.WithError(err).Errorf("cloudflare.CustomCertificates.New error")
+			return fmt.Errorf("failed to create certificate in Cloudflare (zone: %s): %w", s.ZoneId, err)
+		}
+	}
+	s.CertId = cert.ID
+	return nil
+}
+
+// syncOriginPull uploads the leaf certificate and its key for Authenticated
+// Origin Pulls. The CA certificate is deliberately left out: Cloudflare rejects
+// anything but a leaf here. The API has no update method, so a renewal uploads
+// a new certificate and then drops the one it replaced.
+func (s *CloudflareStore) syncOriginPull(ctx context.Context, client *cloudflare.Client, c *tlssecret.Certificate, l *log.Entry) error {
+	cert, err := client.OriginTLSClientAuth.New(ctx, origin_tls_client_auth.OriginTLSClientAuthNewParams{
+		ZoneID:      cloudflare.F(s.ZoneId),
+		Certificate: cloudflare.F(string(c.Certificate)),
+		PrivateKey:  cloudflare.F(string(c.Key)),
+	})
+	if err != nil {
+		l.WithError(err).Errorf("cloudflare.OriginTLSClientAuth.New error")
+		return fmt.Errorf("failed to upload origin pull certificate to Cloudflare (zone: %s): %w", s.ZoneId, err)
+	}
+	replacedCertId := s.CertId
+	s.CertId = cert.ID
+	if replacedCertId == "" || replacedCertId == s.CertId {
+		return nil
+	}
+	if _, err := client.OriginTLSClientAuth.Delete(ctx, replacedCertId, origin_tls_client_auth.OriginTLSClientAuthDeleteParams{
+		ZoneID: cloudflare.F(s.ZoneId),
+	}); err != nil && !isCloudflareNotFound(err) {
+		// The renewed certificate is already live, so a leftover certificate is
+		// not worth failing (and retrying) the whole sync over.
+		l.WithError(err).WithField("replacedId", replacedCertId).Warn("failed to remove replaced origin pull certificate")
+	}
+	return nil
 }
 
 // isCloudflareNotFound returns true when the error reports a 404 from the
@@ -160,13 +204,14 @@ func isCloudflareNotFound(err error) bool {
 	return false
 }
 
-// Delete removes the custom certificate from Cloudflare. 404 responses are
-// treated as success so the operation is idempotent.
+// Delete removes the certificate from Cloudflare. 404 responses are treated as
+// success so the operation is idempotent.
 func (s *CloudflareStore) Delete(ctx context.Context) error {
 	l := log.WithFields(log.Fields{
 		"action":  "cloudflare.Delete",
 		"id":      s.CertId,
 		"zone-id": s.ZoneId,
+		"mode":    s.Mode,
 	})
 	if s.CertId == "" {
 		// Sync never populated cert-id, so there is no remote certificate
@@ -185,9 +230,17 @@ func (s *CloudflareStore) Delete(ctx context.Context) error {
 		return fmt.Errorf("cloudflare credentials lookup failed: %w", err)
 	}
 	client := cloudflare.NewClient(option.WithAPIToken(s.ApiToken))
-	if _, err := client.CustomCertificates.Delete(ctx, s.CertId, custom_certificates.CustomCertificateDeleteParams{
-		ZoneID: cloudflare.F(s.ZoneId),
-	}); err != nil {
+	var err error
+	if s.Mode == ModeOriginPull {
+		_, err = client.OriginTLSClientAuth.Delete(ctx, s.CertId, origin_tls_client_auth.OriginTLSClientAuthDeleteParams{
+			ZoneID: cloudflare.F(s.ZoneId),
+		})
+	} else {
+		_, err = client.CustomCertificates.Delete(ctx, s.CertId, custom_certificates.CustomCertificateDeleteParams{
+			ZoneID: cloudflare.F(s.ZoneId),
+		})
+	}
+	if err != nil {
 		if isCloudflareNotFound(err) {
 			l.Debug("cloudflare certificate already absent; treating delete as success")
 			return nil

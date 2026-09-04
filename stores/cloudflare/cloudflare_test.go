@@ -64,24 +64,24 @@ func TestCloudflareFromConfigParsesNamespacedSecretName(t *testing.T) {
 	assert.Equal(t, "cert", s.CertId)
 }
 
-func TestCloudflareFromConfigParsesLeafOnly(t *testing.T) {
+func TestCloudflareFromConfigParsesMode(t *testing.T) {
 	cases := []struct {
 		name    string
 		value   string
-		want    bool
+		want    string
 		wantErr bool
 	}{
-		{name: "true", value: "true", want: true},
-		{name: "false", value: "false", want: false},
-		{name: "unset defaults to false", value: "", want: false},
-		{name: "invalid value errors", value: "yes", wantErr: true},
+		{name: "origin pull", value: ModeOriginPull, want: ModeOriginPull},
+		{name: "custom certificate", value: ModeCustomCertificate, want: ModeCustomCertificate},
+		{name: "unset defaults to custom certificate", value: "", want: ""},
+		{name: "unknown mode errors", value: "edge", wantErr: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			s := &CloudflareStore{}
 			cfg := map[string]string{"zone-id": "zone"}
 			if tc.value != "" {
-				cfg["leaf-only"] = tc.value
+				cfg["mode"] = tc.value
 			}
 			err := s.FromConfig(tlssecret.GenericSecretSyncConfig{Config: cfg})
 			if tc.wantErr {
@@ -89,28 +89,9 @@ func TestCloudflareFromConfigParsesLeafOnly(t *testing.T) {
 				return
 			}
 			assert.NoError(t, err)
-			assert.Equal(t, tc.want, s.LeafOnly)
+			assert.Equal(t, tc.want, s.Mode)
 		})
 	}
-}
-
-func TestCloudflareCertificatePayload(t *testing.T) {
-	cert := &tlssecret.Certificate{
-		Certificate: []byte("leaf"),
-		Ca:          []byte("ca"),
-	}
-
-	t.Run("full chain by default", func(t *testing.T) {
-		s := &CloudflareStore{}
-		assert.Equal(t, cert.FullChain(), s.certificatePayload(cert))
-		assert.Contains(t, string(s.certificatePayload(cert)), "ca")
-	})
-
-	t.Run("leaf only when enabled", func(t *testing.T) {
-		s := &CloudflareStore{LeafOnly: true}
-		assert.Equal(t, cert.Certificate, s.certificatePayload(cert))
-		assert.NotContains(t, string(s.certificatePayload(cert)), "ca")
-	})
 }
 
 func TestCloudflareSetDefaultSecretNamespace(t *testing.T) {
