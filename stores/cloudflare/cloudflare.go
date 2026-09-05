@@ -21,10 +21,14 @@ const (
 	// Cloudflare must be able to bundle it against its own trust store, so the
 	// certificate has to chain to a publicly trusted CA.
 	ModeCustomCertificate = "custom-certificate"
-	// ModeOriginPull uploads an Authenticated Origin Pulls client certificate
-	// that Cloudflare presents to the origin. It takes the leaf and the private
-	// key only, and the issuing CA may be private.
+	// ModeOriginPull uploads a zone-level Authenticated Origin Pulls client
+	// certificate that Cloudflare presents to the origin. It takes the leaf and
+	// the private key only, and the issuing CA may be private.
 	ModeOriginPull = "origin-pull"
+	// ModeOriginPullHostname is ModeOriginPull scoped to specific hostnames
+	// instead of the whole zone. It requires Hostnames to be set, and takes
+	// precedence over the zone-level certificate for those hostnames.
+	ModeOriginPullHostname = "origin-pull-hostname"
 )
 
 type CloudflareStore struct {
@@ -36,6 +40,9 @@ type CloudflareStore struct {
 	// Mode selects which Cloudflare certificate store to sync to. An empty
 	// value means ModeCustomCertificate.
 	Mode string
+	// Hostnames are the fully qualified domain names to associate the
+	// certificate with, for ModeOriginPullHostname only.
+	Hostnames []string
 }
 
 func (s *CloudflareStore) GetApiToken(ctx context.Context) error {
@@ -70,11 +77,20 @@ func (s *CloudflareStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error 
 	}
 	if c.Config["mode"] != "" {
 		switch c.Config["mode"] {
-		case ModeCustomCertificate, ModeOriginPull:
+		case ModeCustomCertificate, ModeOriginPull, ModeOriginPullHostname:
 			s.Mode = c.Config["mode"]
 		default:
-			return fmt.Errorf("invalid mode %q: must be %q or %q", c.Config["mode"], ModeCustomCertificate, ModeOriginPull)
+			return fmt.Errorf("invalid mode %q: must be one of %q, %q, %q", c.Config["mode"], ModeCustomCertificate, ModeOriginPull, ModeOriginPullHostname)
 		}
+	}
+	if c.Config["hostnames"] != "" {
+		s.Hostnames = parseHostnames(c.Config["hostnames"])
+	}
+	if s.Mode == ModeOriginPullHostname && len(s.Hostnames) == 0 {
+		return fmt.Errorf("mode %q requires a non-empty hostnames list", ModeOriginPullHostname)
+	}
+	if len(s.Hostnames) > 0 && s.Mode != ModeOriginPullHostname {
+		return fmt.Errorf("hostnames is only valid with mode %q", ModeOriginPullHostname)
 	}
 	// if secret name is in the format of "namespace/secretname" then parse it
 	if strings.Contains(s.SecretName, "/") {
@@ -82,6 +98,18 @@ func (s *CloudflareStore) FromConfig(c tlssecret.GenericSecretSyncConfig) error 
 		s.SecretName = strings.Split(s.SecretName, "/")[1]
 	}
 	return nil
+}
+
+// parseHostnames splits a comma separated hostname list, dropping blanks so a
+// trailing comma or a padded value does not turn into an empty association.
+func parseHostnames(v string) []string {
+	var hostnames []string
+	for _, h := range strings.Split(v, ",") {
+		if h = strings.TrimSpace(h); h != "" {
+			hostnames = append(hostnames, h)
+		}
+	}
+	return hostnames
 }
 
 func (s *CloudflareStore) setDefaultSecretNamespace(namespace string) {
@@ -111,9 +139,12 @@ func (s *CloudflareStore) Sync(c *tlssecret.Certificate) (map[string]string, err
 
 	origCertId := s.CertId
 	var err error
-	if s.Mode == ModeOriginPull {
+	switch s.Mode {
+	case ModeOriginPull:
 		err = s.syncOriginPull(ctx, client, c, l)
-	} else {
+	case ModeOriginPullHostname:
+		err = s.syncOriginPullHostname(ctx, client, c, l)
+	default:
 		err = s.syncCustomCertificate(ctx, client, c, l)
 	}
 	if err != nil {
@@ -191,6 +222,62 @@ func (s *CloudflareStore) syncOriginPull(ctx context.Context, client *cloudflare
 	return nil
 }
 
+// syncOriginPullHostname uploads the leaf and key as a per-hostname
+// Authenticated Origin Pulls certificate, then associates it with the
+// configured hostnames. Like the zone-level endpoint it has no update method,
+// so a renewal uploads a new certificate and drops the one it replaced.
+func (s *CloudflareStore) syncOriginPullHostname(ctx context.Context, client *cloudflare.Client, c *tlssecret.Certificate, l *log.Entry) error {
+	cert, err := client.OriginTLSClientAuth.Hostnames.Certificates.New(ctx, origin_tls_client_auth.HostnameCertificateNewParams{
+		ZoneID:      cloudflare.F(s.ZoneId),
+		Certificate: cloudflare.F(string(c.Certificate)),
+		PrivateKey:  cloudflare.F(string(c.Key)),
+	})
+	if err != nil {
+		l.WithError(err).Errorf("cloudflare.OriginTLSClientAuth.Hostnames.Certificates.New error")
+		return fmt.Errorf("failed to upload per-hostname origin pull certificate to Cloudflare (zone: %s): %w", s.ZoneId, err)
+	}
+	replacedCertId := s.CertId
+	s.CertId = cert.ID
+
+	// Associating the hostnames is what puts the new certificate in use, so it
+	// has to succeed before the one it replaces is removed.
+	configs := make([]origin_tls_client_auth.HostnameUpdateParamsConfig, 0, len(s.Hostnames))
+	for _, hostname := range s.Hostnames {
+		configs = append(configs, origin_tls_client_auth.HostnameUpdateParamsConfig{
+			CERTID:   cloudflare.F(s.CertId),
+			Enabled:  cloudflare.F(true),
+			Hostname: cloudflare.F(hostname),
+		})
+	}
+	if _, err := client.OriginTLSClientAuth.Hostnames.Update(ctx, origin_tls_client_auth.HostnameUpdateParams{
+		ZoneID: cloudflare.F(s.ZoneId),
+		Config: cloudflare.F(configs),
+	}); err != nil {
+		l.WithError(err).Errorf("cloudflare.OriginTLSClientAuth.Hostnames.Update error")
+		// The upload landed but is associated with nothing. Drop it, otherwise
+		// every retry of this sync leaves another unused certificate behind.
+		if _, derr := client.OriginTLSClientAuth.Hostnames.Certificates.Delete(ctx, s.CertId, origin_tls_client_auth.HostnameCertificateDeleteParams{
+			ZoneID: cloudflare.F(s.ZoneId),
+		}); derr != nil && !isCloudflareNotFound(derr) {
+			l.WithError(derr).WithField("certId", s.CertId).Warn("failed to remove unassociated origin pull certificate")
+		}
+		s.CertId = replacedCertId
+		return fmt.Errorf("failed to associate hostnames [%s] with certificate %s (zone: %s): %w", strings.Join(s.Hostnames, ", "), cert.ID, s.ZoneId, err)
+	}
+
+	if replacedCertId == "" || replacedCertId == s.CertId {
+		return nil
+	}
+	if _, err := client.OriginTLSClientAuth.Hostnames.Certificates.Delete(ctx, replacedCertId, origin_tls_client_auth.HostnameCertificateDeleteParams{
+		ZoneID: cloudflare.F(s.ZoneId),
+	}); err != nil && !isCloudflareNotFound(err) {
+		// The renewed certificate is already associated, so a leftover
+		// certificate is not worth failing (and retrying) the whole sync over.
+		l.WithError(err).WithField("replacedId", replacedCertId).Warn("failed to remove replaced per-hostname origin pull certificate")
+	}
+	return nil
+}
+
 // isCloudflareNotFound returns true when the error reports a 404 from the
 // Cloudflare API.
 func isCloudflareNotFound(err error) bool {
@@ -231,11 +318,16 @@ func (s *CloudflareStore) Delete(ctx context.Context) error {
 	}
 	client := cloudflare.NewClient(option.WithAPIToken(s.ApiToken))
 	var err error
-	if s.Mode == ModeOriginPull {
+	switch s.Mode {
+	case ModeOriginPull:
 		_, err = client.OriginTLSClientAuth.Delete(ctx, s.CertId, origin_tls_client_auth.OriginTLSClientAuthDeleteParams{
 			ZoneID: cloudflare.F(s.ZoneId),
 		})
-	} else {
+	case ModeOriginPullHostname:
+		_, err = client.OriginTLSClientAuth.Hostnames.Certificates.Delete(ctx, s.CertId, origin_tls_client_auth.HostnameCertificateDeleteParams{
+			ZoneID: cloudflare.F(s.ZoneId),
+		})
+	default:
 		_, err = client.CustomCertificates.Delete(ctx, s.CertId, custom_certificates.CustomCertificateDeleteParams{
 			ZoneID: cloudflare.F(s.ZoneId),
 		})

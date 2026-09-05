@@ -138,12 +138,13 @@ Annotations:
     cert-manager-sync.lestak.sh/cloudflare-secret-name: "example-cloudflare-secret" # secret in same namespace which contains the cloudflare api token. If provided in format "namespace/secret-name", will look in that namespace for the secret
     cert-manager-sync.lestak.sh/cloudflare-zone-id: "example-zone-id" # cloudflare zone id
     cert-manager-sync.lestak.sh/cloudflare-cert-id: "" # will be auto-filled by operator for in-place renewals
-    cert-manager-sync.lestak.sh/cloudflare-mode: "custom-certificate" # "custom-certificate" (default) uploads an edge certificate served to visitors, which must chain to a publicly trusted CA. "origin-pull" uploads an Authenticated Origin Pulls client certificate that Cloudflare presents to your origin: only the leaf and the key are sent, and the issuing CA may be private.
+    cert-manager-sync.lestak.sh/cloudflare-mode: "custom-certificate" # "custom-certificate" (default) uploads an edge certificate served to visitors, which must chain to a publicly trusted CA. "origin-pull" uploads a zone-level Authenticated Origin Pulls client certificate that Cloudflare presents to your origin: only the leaf and the key are sent, and the issuing CA may be private. "origin-pull-hostname" does the same, scoped to the hostnames below.
+    cert-manager-sync.lestak.sh/cloudflare-hostnames: "" # comma-separated fully qualified domain names to associate the certificate with. Required by, and only valid with, mode "origin-pull-hostname"
 ```
 
 #### Choosing a mode
 
-The two modes target different Cloudflare certificate stores, and they are not
+The modes target different Cloudflare certificate stores, and they are not
 interchangeable:
 
 - `custom-certificate` (default) uploads an **edge certificate**, the one
@@ -151,14 +152,27 @@ interchangeable:
   store, so it must chain to a publicly trusted CA. Syncing a certificate issued
   by an internal CA here fails with `The certificate chain you uploaded cannot
   be bundled using Cloudflare's trust store`.
-- `origin-pull` uploads a **client certificate for Authenticated Origin Pulls**,
-  which Cloudflare presents to your origin so the origin can authenticate
-  incoming requests. Only the leaf certificate and the private key are sent —
-  Cloudflare rejects a CA certificate on this endpoint — and the issuing CA may
-  be private, which is the usual setup for origin mTLS.
+- `origin-pull` uploads a **zone-level client certificate for Authenticated
+  Origin Pulls**, which Cloudflare presents to your origin so the origin can
+  authenticate incoming requests. Only the leaf certificate and the private key
+  are sent — Cloudflare rejects a CA certificate on this endpoint — and the
+  issuing CA may be private, which is the usual setup for origin mTLS.
+- `origin-pull-hostname` uploads the same kind of client certificate, but
+  associates it with the hostnames listed in `cloudflare-hostnames` instead of
+  applying to the entire zone:
 
-Authenticated Origin Pulls has no update endpoint, so a renewal uploads the new
-certificate and then removes the one it replaced.
+  ```yaml
+      cert-manager-sync.lestak.sh/cloudflare-mode: "origin-pull-hostname"
+      cert-manager-sync.lestak.sh/cloudflare-hostnames: "api.example.com,geo.example.com"
+  ```
+
+  Reach for this when different hostnames in one zone need different client
+  certificates. Per-hostname certificates take precedence over the zone-level
+  one for the hostnames they cover, and the two settings are otherwise
+  independent — enabling one does not change the other.
+
+Authenticated Origin Pulls has no update endpoint in either mode, so a renewal
+uploads the new certificate and then removes the one it replaced.
 
 ### DigitalOcean
 
@@ -585,7 +599,8 @@ metadata:
     cert-manager-sync.lestak.sh/cloudflare-secret-name: "example-cloudflare-secret" # secret in same namespace which contains the cloudflare api token. If provided in format "namespace/secret-name", will look in that namespace for the secret
     cert-manager-sync.lestak.sh/cloudflare-zone-id: "example-zone-id" # cloudflare zone id
     cert-manager-sync.lestak.sh/cloudflare-cert-id: "" # will be auto-filled by operator for in-place renewals
-    cert-manager-sync.lestak.sh/cloudflare-mode: "custom-certificate" # "custom-certificate" (default) uploads an edge certificate served to visitors, which must chain to a publicly trusted CA. "origin-pull" uploads an Authenticated Origin Pulls client certificate that Cloudflare presents to your origin: only the leaf and the key are sent, and the issuing CA may be private.
+    cert-manager-sync.lestak.sh/cloudflare-mode: "custom-certificate" # "custom-certificate" (default) uploads an edge certificate served to visitors, which must chain to a publicly trusted CA. "origin-pull" uploads a zone-level Authenticated Origin Pulls client certificate that Cloudflare presents to your origin: only the leaf and the key are sent, and the issuing CA may be private. "origin-pull-hostname" does the same, scoped to the hostnames below.
+    cert-manager-sync.lestak.sh/cloudflare-hostnames: "" # comma-separated fully qualified domain names to associate the certificate with. Required by, and only valid with, mode "origin-pull-hostname"
     cert-manager-sync.lestak.sh/digitalocean-enabled: "true" # sync certificate to DigitalOcean
     cert-manager-sync.lestak.sh/digitalocean-secret-name: "example-digitalocean-secret" # secret in same namespace which contains the digitalocean api key. If provided in format "namespace/secret-name", will look in that namespace for the secret
     cert-manager-sync.lestak.sh/digitalocean-cert-name: "my-cert" # unique name to give your cert in DigitalOcean
