@@ -12,14 +12,21 @@ jobs:
         echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $KUBECONFIG
         echo "KUBECONFIG=$KUBECONFIG" >> $GITHUB_ENV
     - run: |
-        BUILDER_NAME="builder-$(echo $GITHUB_RUN_ID | cut -c 1-8)"
+        # The node names must be unique per run, not just the builder name.
+        # The kubernetes driver creates a Deployment named after the NODE, so
+        # two runs sharing builder-amd64/builder-arm64 fight over the same
+        # objects - one run's teardown deletes the other's builders mid-build.
+        # The buildx namespace is shared by every repo, so the other run can be
+        # anyone's.
+        RUN_SUFFIX="$(echo $GITHUB_RUN_ID | cut -c 1-8)"
+        BUILDER_NAME="builder-$RUN_SUFFIX"
         echo BUILDER_NAME=$BUILDER_NAME >> $GITHUB_ENV
         docker buildx create \
         --bootstrap \
         --name=$BUILDER_NAME \
         --driver=kubernetes \
         --platform=linux/amd64 \
-        --node=builder-amd64 \
+        --node=builder-amd64-$RUN_SUFFIX \
         --driver-opt=namespace=buildx,nodeselector="kubernetes.io/arch=amd64"
 
         docker buildx create \
@@ -28,7 +35,7 @@ jobs:
           --name=$BUILDER_NAME \
           --driver=kubernetes \
           --platform=linux/arm64 \
-          --node=builder-arm64 \
+          --node=builder-arm64-$RUN_SUFFIX \
           --driver-opt=namespace=buildx,nodeselector="kubernetes.io/arch=arm64"
     - run: |
         echo ${{ secrets.DOCKER_HUB_PAT }} | docker login --password-stdin --username ${{ secrets.DOCKER_HUB_USERNAME }}
