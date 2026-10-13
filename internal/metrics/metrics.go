@@ -14,7 +14,7 @@ import (
 var (
 	SyncStatus = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "cert_manager_sync_status",
-		Help: "cert-manager-sync status by namespace, secret, and store",
+		Help: "Latest cert-manager-sync status by namespace, secret, and store",
 	}, []string{"namespace", "secret", "store", "status"})
 
 	// LeaderElectionDegraded is 1 when leader election was asked for but the
@@ -34,10 +34,12 @@ func InitMetrics() {
 }
 
 func SetSuccess(namespace, secret, store string) {
+	SyncStatus.WithLabelValues(namespace, secret, store, "fail").Set(0)
 	SyncStatus.WithLabelValues(namespace, secret, store, "success").Set(1)
 }
 
 func SetFailure(namespace, secret, store string) {
+	SyncStatus.WithLabelValues(namespace, secret, store, "success").Set(0)
 	SyncStatus.WithLabelValues(namespace, secret, store, "fail").Set(1)
 }
 

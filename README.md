@@ -784,6 +784,11 @@ The operator exposes Prometheus metrics on `/metrics` endpoint. You can use the 
 cert_manager_sync_status{namespace="cert-manager",secret="example",store="acm",status="success"}
 ```
 
+For each namespace, secret, and store, the metric represents the latest recorded
+sync outcome. A successful sync sets `success=1` and `fail=0`; a failed sync sets
+`fail=1` and `success=0`. Recovery clears the previous failure, so an alert on
+`cert_manager_sync_status{status="fail"} == 1` can resolve after a successful sync.
+
 Setting `ENABLE_METRICS=false` will disable the metrics server.
 
 ### Error Logging
