@@ -301,3 +301,75 @@ func TestIntegrationUpgradeReusesAttachedCertificate(t *testing.T) {
 	svc, _ := state.KubeClient.CoreV1().Services("traefik").Get(ctx, "traefik-https", metav1.GetOptions{})
 	assert.Equal(t, strconv.FormatInt(legacy.ID, 10), svc.Annotations[ccmCertificatesAnnotation])
 }
+
+// TestIntegrationUpgradeRenewalAdoptsAttachedCertificate renews a certificate
+// uploaded by an older version while it's still attached and no Services are
+// managed: the old copy can't be deleted yet, but it must get the owner label
+// so a later sync can clean it up once it's detached.
+func TestIntegrationUpgradeRenewalAdoptsAttachedCertificate(t *testing.T) {
+	client, apiToken := integrationClient(t)
+	ctx := context.Background()
+	detachRetryTimeout = 2 * time.Second
+	certName := fmt.Sprintf("cert-sync-adopt-test-%d", time.Now().UnixNano())
+	owner := ownerValue("traefik", "rpc", certName)
+	t.Cleanup(func() { deleteOwned(client, owner) })
+
+	pem1, key1, _ := generateTestCertificate()
+	legacy, _, err := client.Certificate.Create(ctx, hcloud.CertificateCreateOpts{
+		Name: certName, Type: hcloud.CertificateTypeUploaded, Certificate: string(pem1), PrivateKey: string(key1),
+	})
+	if !assert.NoError(t, err) {
+		return
+	}
+	t.Cleanup(func() { _, _ = client.Certificate.Delete(ctx, legacy) })
+
+	intPtr := func(i int) *int { return &i }
+	lbRes, _, err := client.LoadBalancer.Create(ctx, hcloud.LoadBalancerCreateOpts{
+		Name:             certName,
+		LoadBalancerType: &hcloud.LoadBalancerType{Name: "lb11"},
+		Location:         &hcloud.Location{Name: "nbg1"},
+		Services: []hcloud.LoadBalancerCreateOptsService{{
+			Protocol: hcloud.LoadBalancerServiceProtocolHTTPS, ListenPort: intPtr(443), DestinationPort: intPtr(80),
+			HTTP: &hcloud.LoadBalancerCreateOptsServiceHTTP{Certificates: []*hcloud.Certificate{{ID: legacy.ID}}},
+		}},
+	})
+	if !assert.NoError(t, err) {
+		return
+	}
+	lb := lbRes.LoadBalancer
+	t.Cleanup(func() { _, _ = client.LoadBalancer.Delete(ctx, lb) })
+	_ = client.Action.WaitFor(ctx, lbRes.Action)
+
+	pem2, key2, _ := generateTestCertificate()
+	s := &HetznerCloudStore{ApiToken: apiToken, CertName: certName, CertId: legacy.ID}
+	u, err := s.Sync(&tlssecret.Certificate{SecretName: "rpc", Namespace: "traefik", Certificate: pem2, Key: key2})
+	if !assert.NoError(t, err) {
+		return
+	}
+	backgroundCleanups.Wait()
+	newID, _ := strconv.ParseInt(u["cert-id"], 10, 64)
+
+	stillThere, _, err := client.Certificate.GetByID(ctx, legacy.ID)
+	assert.NoError(t, err)
+	if assert.NotNil(t, stillThere, "attached certificate must not be deleted") {
+		assert.Equal(t, owner, stillThere.Labels[ownerLabel], "attached legacy certificate must be adopted")
+	}
+
+	// Once the LB moves to the new certificate, the next sync deletes the old
+	// one even though cert-id no longer points at it.
+	act, _, err := client.LoadBalancer.UpdateService(ctx, lb, 443, hcloud.LoadBalancerUpdateServiceOpts{
+		HTTP: &hcloud.LoadBalancerUpdateServiceOptsHTTP{Certificates: []*hcloud.Certificate{{ID: newID}}},
+	})
+	if !assert.NoError(t, err) {
+		return
+	}
+	_ = client.Action.WaitFor(ctx, act)
+	pem3, key3, _ := generateTestCertificate()
+	s2 := &HetznerCloudStore{ApiToken: apiToken, CertName: certName, CertId: newID}
+	_, err = s2.Sync(&tlssecret.Certificate{SecretName: "rpc", Namespace: "traefik", Certificate: pem3, Key: key3})
+	assert.NoError(t, err)
+	backgroundCleanups.Wait()
+	gone, _, err := client.Certificate.GetByID(ctx, legacy.ID)
+	assert.NoError(t, err)
+	assert.Nil(t, gone, "adopted legacy certificate should be cleaned up once detached")
+}

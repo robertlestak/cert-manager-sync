@@ -154,6 +154,18 @@ func (s *HetznerCloudStore) Sync(c *tlssecret.Certificate) (map[string]string, e
 		}
 	}
 
+	// Adopt a recorded certificate uploaded before owner labels existed, so it
+	// stays tracked (and is cleaned up later) even if it can't be deleted now.
+	for _, old := range superseded {
+		if old.Labels[ownerLabel] != owner {
+			if updated, _, err := client.Certificate.Update(ctx, old, hcloud.CertificateUpdateOpts{Labels: mergeLabels(old.Labels, labels)}); err != nil {
+				l.WithError(err).WithField("certId", old.ID).Warn("failed to label existing certificate")
+			} else if updated != nil {
+				old.Labels = updated.Labels
+			}
+		}
+	}
+
 	// Hetzner Cloud rejects uploading the same certificate twice. If an earlier
 	// copy already holds this exact certificate (e.g. a re-sync after only the
 	// annotations changed), keep using it instead of uploading.
@@ -179,11 +191,6 @@ func (s *HetznerCloudStore) Sync(c *tlssecret.Certificate) (map[string]string, e
 	superseded = deleteUnused(ctx, client, superseded)
 
 	if cert != nil {
-		if cert.Labels[ownerLabel] != owner {
-			if _, _, err := client.Certificate.Update(ctx, cert, hcloud.CertificateUpdateOpts{Labels: mergeLabels(cert.Labels, labels)}); err != nil {
-				l.WithError(err).Warn("failed to label existing certificate")
-			}
-		}
 		l.WithField("id", cert.ID).Debug("certificate already uploaded, reusing it")
 	} else {
 		for holder := certHolder(superseded, certName); holder != nil; holder = certHolder(superseded, certName) {
