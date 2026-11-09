@@ -271,6 +271,7 @@ Annotations:
     cert-manager-sync.lestak.sh/hetznercloud-secret-name: "example-hetzner-secret" # secret in same namespace which contains the hetzner cloud api token. If provided in format "namespace/secret-name", will look in that namespace for the secret
     cert-manager-sync.lestak.sh/hetznercloud-cert-name: "my-cert" # unique name to give your cert in Hetzner Cloud (optional, defaults to secret name)
     cert-manager-sync.lestak.sh/hetznercloud-cert-id: "" # will be auto-filled by operator for in-place renewals
+    cert-manager-sync.lestak.sh/hetznercloud-services: "traefik/traefik" # (optional) comma-separated namespace/name of LoadBalancer Services to move to the renewed certificate, see below
     cert-manager-sync.lestak.sh/hetznercloud-label-environment: "production" # (optional) add labels to the certificate in Hetzner Cloud
     cert-manager-sync.lestak.sh/hetznercloud-label-team: "devops" # (optional) add more labels as needed
 ```
@@ -288,22 +289,18 @@ When cert-manager-sync updates a certificate in Hetzner Cloud:
 
 **Important for Hetzner Cloud Controller Manager users:**
 
-The Hetzner Cloud Controller Manager (for Kubernetes LoadBalancer services) identifies certificates by their exact name or ID specified in the annotation:
+The Hetzner Cloud Controller Manager identifies certificates by the exact name or ID in the Service annotation:
 ```yaml
 load-balancer.hetzner.cloud/http-certificates: "my-cert-name"
 ```
 
-When cert-manager-sync creates a new certificate with a modified name (due to the old one being in use), you must:
-1. Update the annotation to the new certificate name
-2. Apply the service changes to trigger the Load Balancer update
+Set `cert-manager-sync.lestak.sh/hetznercloud-services` to the Services that use the certificate, and enable `clusterRole.patchServices` in the Helm chart. When a renewal has to create the certificate under a new name, the operator then:
 
-**Example workflow for certificate renewal when in use:**
-1. cert-manager renews the certificate
-2. cert-manager-sync attempts to update in Hetzner Cloud
-3. If the old certificate is in use, a new one is created as `my-cert-name-12345`
-4. Update your service annotation: `load-balancer.hetzner.cloud/http-certificates: "my-cert-name-12345"`
-5. Apply the service to update the Load Balancer
-6. Once updated, the old certificate can be manually deleted from Hetzner Cloud Console
+1. replaces the old certificate (by name or ID) with the new certificate ID in each listed Service's `load-balancer.hetzner.cloud/http-certificates` annotation (other certificates in the list are kept, and a Service that doesn't reference the old certificate is left alone)
+2. waits up to 90 seconds for the Cloud Controller Manager to move the Load Balancer to the new certificate, then deletes the old one
+3. if the old certificate is still in use after that, records its ID in `cert-manager-sync.lestak.sh/hetznercloud-pending-delete` and retries the deletion on every later sync
+
+Without `hetznercloud-services`, the new certificate is created as `original-name-{old-cert-id}` and you must update the Service annotation yourself, then delete the old certificate from the Hetzner Cloud Console once it's detached.
 
 **Labels Support:**
 Certificates can be labeled for organization and tracking purposes. Use annotations like:
@@ -587,6 +584,7 @@ metadata:
     cert-manager-sync.lestak.sh/hetznercloud-secret-name: "example-hetzner-secret" # secret in same namespace which contains hetzner cloud api token
     cert-manager-sync.lestak.sh/hetznercloud-cert-name: "my-cert" # unique name to give your cert in Hetzner Cloud
     cert-manager-sync.lestak.sh/hetznercloud-cert-id: "" # will be auto-filled by operator for in-place renewals
+    cert-manager-sync.lestak.sh/hetznercloud-services: "traefik/traefik" # (optional) comma-separated namespace/name of LoadBalancer Services to move to the renewed certificate
     cert-manager-sync.lestak.sh/incapsula-site-id: "12345" # incapsula site to attach cert
     cert-manager-sync.lestak.sh/incapsula-secret-name: "cert-manager-sync-poc" # secret in same namespace which contains incapsula api key
     cert-manager-sync.lestak.sh/threatx-hostname: "example.com" # threatx hostname to attach cert

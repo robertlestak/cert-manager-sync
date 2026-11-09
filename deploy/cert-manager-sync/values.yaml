@@ -89,6 +89,8 @@ serviceAccount:
 
 clusterRole:
   create: true
+  # -- Allow patching Services, needed for `hetznercloud-services` to move Load Balancer Services to renewed certificates
+  patchServices: false
 
 podAnnotations: {}
 

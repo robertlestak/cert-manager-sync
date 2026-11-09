@@ -11,6 +11,7 @@ import (
 	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
 	log "github.com/sirupsen/logrus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 )
 
 type HetznerCloudStore struct {
@@ -20,6 +21,14 @@ type HetznerCloudStore struct {
 	CertName        string
 	CertId          int64
 	Labels          map[string]string
+	// ServicesRaw lists Kubernetes Services ("ns/name,...") whose
+	// load-balancer.hetzner.cloud/http-certificates annotation should follow
+	// the certificate when it has to be re-created under a new name.
+	ServicesRaw string
+	Services    []k8stypes.NamespacedName
+	// PendingDelete holds superseded certificate IDs that were still attached
+	// to a Load Balancer when last checked.
+	PendingDelete []int64
 }
 
 func (s *HetznerCloudStore) GetApiToken(ctx context.Context) error {
@@ -62,6 +71,9 @@ func (s *HetznerCloudStore) FromConfig(c tlssecret.GenericSecretSyncConfig) erro
 		s.CertId = certId
 	}
 
+	s.ServicesRaw = c.Config["services"]
+	s.PendingDelete = parseIDs(c.Config["pending-delete"])
+
 	// Parse labels if provided
 	s.Labels = make(map[string]string)
 	for k, v := range c.Config {
@@ -83,6 +95,13 @@ func (s *HetznerCloudStore) FromConfig(c tlssecret.GenericSecretSyncConfig) erro
 func (s *HetznerCloudStore) Sync(c *tlssecret.Certificate) (map[string]string, error) {
 	if s.SecretNamespace == "" {
 		s.SecretNamespace = c.Namespace
+	}
+	if s.ServicesRaw != "" {
+		refs, err := parseServiceRefs(s.ServicesRaw, c.Namespace)
+		if err != nil {
+			return nil, err
+		}
+		s.Services = refs
 	}
 	l := log.WithFields(log.Fields{
 		"action":          "Update",
@@ -117,6 +136,9 @@ func (s *HetznerCloudStore) Sync(c *tlssecret.Certificate) (map[string]string, e
 
 	// Check if we need to update an existing certificate
 	origCertId := s.CertId
+	origPending := joinIDs(s.PendingDelete)
+	s.PendingDelete = cleanupPending(ctx, client, s.PendingDelete)
+	var supersededRefs []string
 
 	// If we have a cert ID, try to delete the old certificate first
 	// Hetzner Cloud doesn't support in-place updates, so we need to delete and recreate
@@ -133,6 +155,7 @@ func (s *HetznerCloudStore) Sync(c *tlssecret.Certificate) (map[string]string, e
 				l.Warnf("certificate %d is in use by %d resources, skipping deletion", s.CertId, len(existingCert.UsedBy))
 				// Generate a new name for the certificate to avoid conflicts
 				certName = fmt.Sprintf("%s-%d", certName, origCertId)
+				supersededRefs = []string{strconv.FormatInt(existingCert.ID, 10), existingCert.Name}
 			} else {
 				// Delete the old certificate
 				l.WithField("id", s.CertId).Debugf("deleting old certificate")
@@ -166,12 +189,24 @@ func (s *HetznerCloudStore) Sync(c *tlssecret.Certificate) (map[string]string, e
 	l = l.WithField("id", cert.ID)
 	s.CertId = cert.ID
 
-	// Prepare updates to annotations if cert ID changed
-	var newKeys map[string]string
-	if origCertId != s.CertId {
-		newKeys = map[string]string{
-			"cert-id": strconv.FormatInt(s.CertId, 10),
+	// Move referencing Services to the new certificate, then retire the old one
+	// once the cloud controller manager has detached it.
+	if len(supersededRefs) > 0 && len(s.Services) > 0 {
+		if err := s.updateServices(ctx, supersededRefs, cert.ID); err != nil {
+			l.WithError(err).Error("failed to update services to the new certificate")
 		}
+		if !waitAndDelete(ctx, client, origCertId) {
+			s.PendingDelete = append(s.PendingDelete, origCertId)
+		}
+	}
+
+	// Prepare updates to annotations if cert ID changed
+	newKeys := map[string]string{}
+	if origCertId != s.CertId {
+		newKeys["cert-id"] = strconv.FormatInt(s.CertId, 10)
+	}
+	if pending := joinIDs(s.PendingDelete); pending != origPending {
+		newKeys["pending-delete"] = pending
 	}
 
 	l.Info("certificate synced")
