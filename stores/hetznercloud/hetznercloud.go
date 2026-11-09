@@ -26,9 +26,6 @@ type HetznerCloudStore struct {
 	// the certificate when it has to be re-created under a new name.
 	ServicesRaw string
 	Services    []k8stypes.NamespacedName
-	// PendingDelete holds superseded certificate IDs that were still attached
-	// to a Load Balancer when last checked.
-	PendingDelete []int64
 }
 
 func (s *HetznerCloudStore) GetApiToken(ctx context.Context) error {
@@ -72,7 +69,6 @@ func (s *HetznerCloudStore) FromConfig(c tlssecret.GenericSecretSyncConfig) erro
 	}
 
 	s.ServicesRaw = c.Config["services"]
-	s.PendingDelete = parseIDs(c.Config["pending-delete"])
 
 	// Parse labels if provided
 	s.Labels = make(map[string]string)
@@ -134,49 +130,48 @@ func (s *HetznerCloudStore) Sync(c *tlssecret.Certificate) (map[string]string, e
 		certName = c.SecretName
 	}
 
-	// Check if we need to update an existing certificate
 	origCertId := s.CertId
-	origPending := joinIDs(s.PendingDelete)
-	s.PendingDelete = cleanupPending(ctx, client, s.PendingDelete)
-	var supersededRefs []string
+	owner := ownerValue(c.Namespace, c.SecretName, certName)
+	labels := map[string]string{ownerLabel: owner}
+	for k, v := range s.Labels {
+		labels[k] = v
+	}
 
-	// If we have a cert ID, try to delete the old certificate first
-	// Hetzner Cloud doesn't support in-place updates, so we need to delete and recreate
-	if s.CertId != 0 {
-		l.WithField("id", s.CertId).Debugf("checking existing certificate")
-
-		// Check if certificate exists
-		existingCert, _, err := client.Certificate.GetByID(ctx, s.CertId)
+	// Everything this sync uploaded before, plus the recorded certificate if it
+	// predates owner labels. All of it is superseded once the new one exists.
+	superseded, err := ownedCertificates(ctx, client, owner)
+	if err != nil {
+		l.WithError(err).Warn("failed to list previously uploaded certificates")
+	}
+	if s.CertId != 0 && !containsCert(superseded, s.CertId) {
+		existing, _, err := client.Certificate.GetByID(ctx, s.CertId)
 		if err != nil {
 			l.WithError(err).Warnf("failed to get existing certificate, it may have been deleted")
-		} else if existingCert != nil {
-			// Check if certificate is in use
-			if len(existingCert.UsedBy) > 0 {
-				l.Warnf("certificate %d is in use by %d resources, skipping deletion", s.CertId, len(existingCert.UsedBy))
-				// Generate a new name for the certificate to avoid conflicts
-				certName = fmt.Sprintf("%s-%d", certName, origCertId)
-				supersededRefs = []string{strconv.FormatInt(existingCert.ID, 10), existingCert.Name}
-			} else {
-				// Delete the old certificate
-				l.WithField("id", s.CertId).Debugf("deleting old certificate")
-				_, err = client.Certificate.Delete(ctx, existingCert)
-				if err != nil {
-					l.WithError(err).Errorf("failed to delete old certificate")
-					// Continue anyway - we'll try to create a new one
-				} else {
-					l.WithField("id", s.CertId).Debugf("old certificate deleted")
-				}
-			}
+		} else if existing != nil {
+			superseded = append(superseded, existing)
 		}
 	}
 
-	// Create the new certificate
+	var staleRefs []string
+	for _, old := range superseded {
+		staleRefs = append(staleRefs, strconv.FormatInt(old.ID, 10), old.Name)
+	}
+
+	// Hetzner Cloud certificates can't be updated in place. Free the name by
+	// deleting unused copies first; if one holding the name is still attached
+	// to a Load Balancer, upload under a new name instead.
+	superseded = deleteUnused(ctx, client, superseded)
+	for holder := certHolder(superseded, certName); holder != nil; holder = certHolder(superseded, certName) {
+		l.Warnf("certificate %d is in use by %d resources, uploading under a new name", holder.ID, len(holder.UsedBy))
+		certName = fmt.Sprintf("%s-%d", certName, holder.ID)
+	}
+
 	createOpts := hcloud.CertificateCreateOpts{
 		Name:        certName,
 		Type:        hcloud.CertificateTypeUploaded,
 		Certificate: string(c.Certificate),
 		PrivateKey:  string(c.Key),
-		Labels:      s.Labels,
+		Labels:      labels,
 	}
 
 	l.WithField("name", certName).Debugf("creating new certificate")
@@ -189,24 +184,18 @@ func (s *HetznerCloudStore) Sync(c *tlssecret.Certificate) (map[string]string, e
 	l = l.WithField("id", cert.ID)
 	s.CertId = cert.ID
 
-	// Move referencing Services to the new certificate, then retire the old one
-	// once the cloud controller manager has detached it.
-	if len(supersededRefs) > 0 && len(s.Services) > 0 {
-		if err := s.updateServices(ctx, supersededRefs, cert.ID); err != nil {
-			l.WithError(err).Error("failed to update services to the new certificate")
-		}
-		if !waitAndDelete(ctx, client, origCertId) {
-			s.PendingDelete = append(s.PendingDelete, origCertId)
+	if len(s.Services) > 0 {
+		if err := s.ensureServices(ctx, staleRefs, cert.ID); err != nil {
+			// Fail the sync so it is retried; the certificate uploaded here is
+			// owner-labelled and gets replaced by the retry.
+			return nil, err
 		}
 	}
+	retryDetached(client, superseded)
 
-	// Prepare updates to annotations if cert ID changed
 	newKeys := map[string]string{}
 	if origCertId != s.CertId {
 		newKeys["cert-id"] = strconv.FormatInt(s.CertId, 10)
-	}
-	if pending := joinIDs(s.PendingDelete); pending != origPending {
-		newKeys["pending-delete"] = pending
 	}
 
 	l.Info("certificate synced")
@@ -245,4 +234,22 @@ func (s *HetznerCloudStore) Delete(ctx context.Context) error {
 	}
 	l.Info("certificate deleted from hetznercloud")
 	return nil
+}
+
+func certHolder(certs []*hcloud.Certificate, name string) *hcloud.Certificate {
+	for _, c := range certs {
+		if c.Name == name {
+			return c
+		}
+	}
+	return nil
+}
+
+func containsCert(certs []*hcloud.Certificate, id int64) bool {
+	for _, c := range certs {
+		if c.ID == id {
+			return true
+		}
+	}
+	return false
 }

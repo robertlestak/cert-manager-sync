@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
-
 	"github.com/robertlestak/cert-manager-sync/pkg/state"
 	"github.com/robertlestak/cert-manager-sync/pkg/tlssecret"
 	"github.com/stretchr/testify/assert"
@@ -33,103 +32,116 @@ func TestParseServiceRefs(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestReplaceCertRefs(t *testing.T) {
-	cases := []struct {
-		name, in, want string
-		replaced       bool
-	}{
-		{"by name", "rpc-cert", "42", true},
-		{"by id", "7", "42", true},
-		{"keeps other SNI certs", "other, rpc-cert", "other,42", true},
-		{"dedupes when new id already listed", "42,rpc-cert", "42", true},
-		{"no match leaves annotation alone", "other", "other", false},
-		{"empty", "", "", false},
+func TestPointCertRefs(t *testing.T) {
+	stale := []string{"7", "rpc-cert"}
+	cases := []struct{ name, in, want string }{
+		{"first attach", "", "42"},
+		{"renewal by name", "rpc-cert", "42"},
+		{"renewal by id", "7", "42"},
+		{"keeps unrelated SNI certs", "other, rpc-cert", "other,42"},
+		{"adds to unrelated certs", "other", "other,42"},
+		{"no duplicate", "42,rpc-cert", "42"},
+		{"already current", "42", "42"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, replaced := replaceCertRefs(tc.in, []string{"7", "rpc-cert"}, 42)
-			assert.Equal(t, tc.want, got)
-			assert.Equal(t, tc.replaced, replaced)
+			assert.Equal(t, tc.want, pointCertRefs(tc.in, stale, 42))
 		})
 	}
 }
 
-func TestUpdateServices(t *testing.T) {
+func TestOwnerValue(t *testing.T) {
+	a := ownerValue("traefik", "rpc-tls", "rpc")
+	assert.Len(t, a, 40)
+	assert.Equal(t, a, ownerValue("traefik", "rpc-tls", "rpc"))
+	assert.NotEqual(t, a, ownerValue("traefik", "rpc-tls", "rpc2"))
+	assert.NotEqual(t, a, ownerValue("other", "rpc-tls", "rpc"))
+}
+
+func TestEnsureServices(t *testing.T) {
 	oldClient := state.KubeClient
 	state.KubeClient = fake.NewSimpleClientset(
+		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "fresh", Namespace: "traefik"}},
 		&corev1.Service{ObjectMeta: metav1.ObjectMeta{
-			Name: "traefik-https", Namespace: "traefik",
-			Annotations: map[string]string{ccmCertificatesAnnotation: "rpc-cert", "keep": "me"},
+			Name: "renewed", Namespace: "traefik",
+			Annotations: map[string]string{ccmCertificatesAnnotation: "other,rpc-cert", "keep": "me"},
 		}},
 		&corev1.Service{ObjectMeta: metav1.ObjectMeta{
-			Name: "unrelated", Namespace: "traefik",
-			Annotations: map[string]string{ccmCertificatesAnnotation: "someone-else"},
+			Name: "current", Namespace: "traefik", ResourceVersion: "5",
+			Annotations: map[string]string{ccmCertificatesAnnotation: "42"},
 		}},
 	)
 	t.Cleanup(func() { state.KubeClient = oldClient })
 
 	s := &HetznerCloudStore{Services: []k8stypes.NamespacedName{
-		{Namespace: "traefik", Name: "traefik-https"},
-		{Namespace: "traefik", Name: "unrelated"},
+		{Namespace: "traefik", Name: "fresh"},
+		{Namespace: "traefik", Name: "renewed"},
+		{Namespace: "traefik", Name: "current"},
 	}}
-	assert.NoError(t, s.updateServices(context.Background(), []string{"7", "rpc-cert"}, 42))
+	assert.NoError(t, s.ensureServices(context.Background(), []string{"7", "rpc-cert"}, 42))
 
-	got, _ := state.KubeClient.CoreV1().Services("traefik").Get(context.Background(), "traefik-https", metav1.GetOptions{})
-	assert.Equal(t, "42", got.Annotations[ccmCertificatesAnnotation])
-	assert.Equal(t, "me", got.Annotations["keep"])
+	get := func(name string) *corev1.Service {
+		svc, err := state.KubeClient.CoreV1().Services("traefik").Get(context.Background(), name, metav1.GetOptions{})
+		assert.NoError(t, err)
+		return svc
+	}
+	assert.Equal(t, "42", get("fresh").Annotations[ccmCertificatesAnnotation])
+	renewed := get("renewed")
+	assert.Equal(t, "other,42", renewed.Annotations[ccmCertificatesAnnotation])
+	assert.Equal(t, "me", renewed.Annotations["keep"])
+	assert.Equal(t, "5", get("current").ResourceVersion, "up-to-date service must not be patched")
 
-	other, _ := state.KubeClient.CoreV1().Services("traefik").Get(context.Background(), "unrelated", metav1.GetOptions{})
-	assert.Equal(t, "someone-else", other.Annotations[ccmCertificatesAnnotation])
-
-	s.Services = append(s.Services, k8stypes.NamespacedName{Namespace: "traefik", Name: "missing"})
-	assert.Error(t, s.updateServices(context.Background(), []string{"7"}, 42))
+	s.Services = []k8stypes.NamespacedName{{Namespace: "traefik", Name: "missing"}}
+	assert.Error(t, s.ensureServices(context.Background(), nil, 42))
 }
 
-func TestFromConfigServicesAndPending(t *testing.T) {
-	s := &HetznerCloudStore{}
-	err := s.FromConfig(tlssecret.GenericSecretSyncConfig{Store: "hetznercloud", Config: map[string]string{
-		"services":       "traefik/traefik-https",
-		"pending-delete": "11, 12,bogus",
-	}})
-	assert.NoError(t, err)
-	assert.Equal(t, "traefik/traefik-https", s.ServicesRaw)
-	assert.Equal(t, []int64{11, 12}, s.PendingDelete)
-}
-
-// TestIntegrationInUseRenewalUpdatesServices renews a certificate attached to a
-// Load Balancer and checks that the referencing Service is moved to the new
-// certificate and the old one is deleted once the LB releases it.
-func TestIntegrationInUseRenewalUpdatesServices(t *testing.T) {
+func integrationClient(t *testing.T) (*hcloud.Client, string) {
+	t.Helper()
 	apiToken := os.Getenv("HETZNER_TEST_TOKEN")
 	if apiToken == "" {
 		t.Skip("Skipping integration test: HETZNER_TEST_TOKEN not set")
 	}
-	oldTimeout, oldInterval := unusedPollTimeout, unusedPollInterval
-	unusedPollTimeout, unusedPollInterval = 5*time.Second, time.Second
-	t.Cleanup(func() { unusedPollTimeout, unusedPollInterval = oldTimeout, oldInterval })
+	oldTimeout, oldInterval := detachRetryTimeout, detachRetryInterval
+	detachRetryTimeout, detachRetryInterval = 30*time.Second, time.Second
+	t.Cleanup(func() { detachRetryTimeout, detachRetryInterval = oldTimeout, oldInterval })
+	return hcloud.NewClient(hcloud.WithToken(apiToken)), apiToken
+}
 
+func deleteOwned(client *hcloud.Client, owner string) {
+	certs, _ := ownedCertificates(context.Background(), client, owner)
+	for _, c := range certs {
+		_, _ = client.Certificate.Delete(context.Background(), c)
+	}
+}
+
+// TestIntegrationInUseRenewalMovesServices renews a certificate attached to a
+// Load Balancer: the Service must move to the new certificate without the sync
+// blocking, and the old certificate must be deleted once the LB releases it.
+func TestIntegrationInUseRenewalMovesServices(t *testing.T) {
+	client, apiToken := integrationClient(t)
 	ctx := context.Background()
-	client := hcloud.NewClient(hcloud.WithToken(apiToken))
-	certName := fmt.Sprintf("cert-sync-svc-test-%d", time.Now().Unix())
+	certName := fmt.Sprintf("cert-sync-svc-test-%d", time.Now().UnixNano())
+	owner := ownerValue("traefik", "rpc", certName)
+	t.Cleanup(func() { deleteOwned(client, owner) })
 
 	oldKube := state.KubeClient
-	state.KubeClient = fake.NewSimpleClientset(&corev1.Service{ObjectMeta: metav1.ObjectMeta{
-		Name: "traefik-https", Namespace: "traefik",
-		Annotations: map[string]string{ccmCertificatesAnnotation: certName},
-	}})
+	state.KubeClient = fake.NewSimpleClientset(&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "traefik-https", Namespace: "traefik"}})
 	t.Cleanup(func() { state.KubeClient = oldKube })
+	svcAnnotation := func() string {
+		svc, _ := state.KubeClient.CoreV1().Services("traefik").Get(ctx, "traefik-https", metav1.GetOptions{})
+		return svc.Annotations[ccmCertificatesAnnotation]
+	}
 
-	cert1, key1, err := generateTestCertificate()
-	assert.NoError(t, err)
-	cert2, key2, err := generateTestCertificate()
-	assert.NoError(t, err)
+	cert1, key1, _ := generateTestCertificate()
+	cert2, key2, _ := generateTestCertificate()
 
-	s := &HetznerCloudStore{ApiToken: apiToken, CertName: certName, SecretName: "test-secret", ServicesRaw: "traefik/traefik-https"}
-	u1, err := s.Sync(&tlssecret.Certificate{SecretName: "rpc", Namespace: "traefik", Certificate: cert1, Key: key1})
+	s1 := &HetznerCloudStore{ApiToken: apiToken, CertName: certName, ServicesRaw: "traefik/traefik-https"}
+	u1, err := s1.Sync(&tlssecret.Certificate{SecretName: "rpc", Namespace: "traefik", Certificate: cert1, Key: key1})
 	if !assert.NoError(t, err) {
 		return
 	}
 	oldID, _ := strconv.ParseInt(u1["cert-id"], 10, 64)
+	assert.Equal(t, u1["cert-id"], svcAnnotation(), "first sync must attach the certificate to the service")
 
 	intPtr := func(i int) *int { return &i }
 	lbRes, _, err := client.LoadBalancer.Create(ctx, hcloud.LoadBalancerCreateOpts{
@@ -145,32 +157,28 @@ func TestIntegrationInUseRenewalUpdatesServices(t *testing.T) {
 		return
 	}
 	lb := lbRes.LoadBalancer
-	var newID int64
-	t.Cleanup(func() {
-		_, _ = client.LoadBalancer.Delete(ctx, lb)
-		for _, id := range []int64{oldID, newID} {
-			if id != 0 {
-				_, _ = client.Certificate.Delete(ctx, &hcloud.Certificate{ID: id})
-			}
-		}
-	})
+	t.Cleanup(func() { _, _ = client.LoadBalancer.Delete(ctx, lb) })
 	_ = client.Action.WaitFor(ctx, lbRes.Action)
 
-	// Renew while the LB still uses the old certificate. No CCM runs here, so
-	// the old certificate stays attached and must end up pending deletion.
-	s2 := &HetznerCloudStore{ApiToken: apiToken, CertName: certName, SecretName: "test-secret", ServicesRaw: "traefik/traefik-https", CertId: oldID}
+	start := time.Now()
+	s2 := &HetznerCloudStore{ApiToken: apiToken, CertName: certName, ServicesRaw: "traefik/traefik-https", CertId: oldID}
 	u2, err := s2.Sync(&tlssecret.Certificate{SecretName: "rpc", Namespace: "traefik", Certificate: cert2, Key: key2})
 	if !assert.NoError(t, err) {
 		return
 	}
-	newID, _ = strconv.ParseInt(u2["cert-id"], 10, 64)
+	assert.Less(t, time.Since(start), 10*time.Second, "sync must not wait for the LB to release the old certificate")
+	newID, _ := strconv.ParseInt(u2["cert-id"], 10, 64)
 	assert.NotEqual(t, oldID, newID)
-	assert.Equal(t, strconv.FormatInt(oldID, 10), u2["pending-delete"])
+	assert.Equal(t, u2["cert-id"], svcAnnotation())
 
-	svc, _ := state.KubeClient.CoreV1().Services("traefik").Get(ctx, "traefik-https", metav1.GetOptions{})
-	assert.Equal(t, strconv.FormatInt(newID, 10), svc.Annotations[ccmCertificatesAnnotation])
+	newCert, _, _ := client.Certificate.GetByID(ctx, newID)
+	if assert.NotNil(t, newCert) {
+		assert.Equal(t, fmt.Sprintf("%s-%d", certName, oldID), newCert.Name)
+		assert.Equal(t, owner, newCert.Labels[ownerLabel])
+	}
 
-	// Simulate the CCM reconciling the Service onto the new certificate.
+	// Act as the CCM: move the LB to the new certificate. The background
+	// cleanup started by the sync should then delete the old one.
 	act, _, err := client.LoadBalancer.UpdateService(ctx, lb, 443, hcloud.LoadBalancerUpdateServiceOpts{
 		HTTP: &hcloud.LoadBalancerUpdateServiceOptsHTTP{Certificates: []*hcloud.Certificate{{ID: newID}}},
 	})
@@ -178,9 +186,46 @@ func TestIntegrationInUseRenewalUpdatesServices(t *testing.T) {
 		return
 	}
 	_ = client.Action.WaitFor(ctx, act)
+	backgroundCleanups.Wait()
 
-	assert.Empty(t, cleanupPending(ctx, client, []int64{oldID}))
 	gone, _, err := client.Certificate.GetByID(ctx, oldID)
 	assert.NoError(t, err)
-	assert.Nil(t, gone)
+	assert.Nil(t, gone, "old certificate should be deleted once detached")
+}
+
+// TestIntegrationSyncCleansOrphans simulates certificates left behind by an
+// interrupted sync (uploaded, but cert-id never recorded on the secret): the
+// next sync must delete them and keep only the new certificate.
+func TestIntegrationSyncCleansOrphans(t *testing.T) {
+	client, apiToken := integrationClient(t)
+	ctx := context.Background()
+	certName := fmt.Sprintf("cert-sync-orphan-test-%d", time.Now().UnixNano())
+	owner := ownerValue("traefik", "rpc", certName)
+	t.Cleanup(func() { deleteOwned(client, owner) })
+
+	for i := 0; i < 2; i++ {
+		pem, key, _ := generateTestCertificate()
+		_, _, err := client.Certificate.Create(ctx, hcloud.CertificateCreateOpts{
+			Name: fmt.Sprintf("%s-orphan-%d", certName, i), Type: hcloud.CertificateTypeUploaded,
+			Certificate: string(pem), PrivateKey: string(key), Labels: map[string]string{ownerLabel: owner},
+		})
+		if !assert.NoError(t, err) {
+			return
+		}
+	}
+
+	pem, key, _ := generateTestCertificate()
+	s := &HetznerCloudStore{ApiToken: apiToken, CertName: certName}
+	u, err := s.Sync(&tlssecret.Certificate{SecretName: "rpc", Namespace: "traefik", Certificate: pem, Key: key})
+	if !assert.NoError(t, err) {
+		return
+	}
+	backgroundCleanups.Wait()
+
+	owned, err := ownedCertificates(ctx, client, owner)
+	assert.NoError(t, err)
+	if assert.Len(t, owned, 1) {
+		assert.Equal(t, u["cert-id"], strconv.FormatInt(owned[0].ID, 10))
+		assert.Equal(t, certName, owned[0].Name)
+	}
 }

@@ -2,10 +2,13 @@ package hetznercloud
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
@@ -19,11 +22,24 @@ import (
 // listing the certificates (by name or ID) of an HTTPS Load Balancer service.
 const ccmCertificatesAnnotation = "load-balancer.hetzner.cloud/http-certificates"
 
-// Overridden in tests to keep them fast.
+// ownerLabel marks every certificate this store uploads with a hash of the
+// source secret and certificate name, so superseded or orphaned copies (for
+// example from a sync interrupted by a restart) can be found and cleaned up.
+const ownerLabel = "cert-manager-sync.lestak.sh/owner"
+
+// Superseded certificates still attached to a Load Balancer are retried in the
+// background, so a sync never blocks waiting for the CCM to detach them.
+// Overridden in tests.
 var (
-	unusedPollTimeout  = 90 * time.Second
-	unusedPollInterval = 5 * time.Second
+	detachRetryTimeout  = 5 * time.Minute
+	detachRetryInterval = 10 * time.Second
+	backgroundCleanups  sync.WaitGroup
 )
+
+func ownerValue(namespace, secretName, certName string) string {
+	sum := sha256.Sum256([]byte(namespace + "/" + secretName + "/" + certName))
+	return hex.EncodeToString(sum[:])[:40]
+}
 
 // parseServiceRefs parses "ns/name,ns/name". Entries without a namespace use
 // defaultNamespace.
@@ -47,79 +63,66 @@ func parseServiceRefs(s, defaultNamespace string) ([]k8stypes.NamespacedName, er
 	return refs, nil
 }
 
-func parseIDs(s string) []int64 {
-	var ids []int64
-	for _, raw := range strings.Split(s, ",") {
-		if id, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64); err == nil && id > 0 {
-			ids = append(ids, id)
+// pointCertRefs makes a comma-separated certificate list reference newID: any
+// entry naming one of staleRefs (IDs or names of certificates this store
+// replaced) is swapped for newID, and newID is appended if it isn't listed yet.
+// Entries for unrelated certificates (e.g. other SNI hostnames) are kept.
+func pointCertRefs(annotation string, staleRefs []string, newID int64) string {
+	newRef := strconv.FormatInt(newID, 10)
+	stale := map[string]bool{}
+	for _, r := range staleRefs {
+		if r != "" {
+			stale[r] = true
 		}
 	}
-	return ids
-}
-
-func joinIDs(ids []int64) string {
-	parts := make([]string, len(ids))
-	for i, id := range ids {
-		parts[i] = strconv.FormatInt(id, 10)
-	}
-	return strings.Join(parts, ",")
-}
-
-// replaceCertRefs swaps every entry of a comma-separated certificate list that
-// matches one of oldRefs (a name or an ID) for newID. It reports whether
-// anything was replaced; other entries (e.g. extra SNI certificates) are kept.
-func replaceCertRefs(annotation string, oldRefs []string, newID int64) (string, bool) {
-	newRef := strconv.FormatInt(newID, 10)
-	entries := strings.Split(annotation, ",")
-	replaced := false
 	seen := map[string]bool{}
 	var out []string
-	for _, e := range entries {
+	for _, e := range strings.Split(annotation, ",") {
 		e = strings.TrimSpace(e)
 		if e == "" {
 			continue
 		}
-		for _, old := range oldRefs {
-			if old != "" && e == old {
-				e = newRef
-				replaced = true
-				break
-			}
+		if stale[e] {
+			e = newRef
 		}
 		if !seen[e] {
 			seen[e] = true
 			out = append(out, e)
 		}
 	}
-	return strings.Join(out, ","), replaced
+	if !seen[newRef] {
+		out = append(out, newRef)
+	}
+	return strings.Join(out, ",")
 }
 
-// updateServices points the listed Services' CCM certificate annotation at the
-// new certificate. A Service that does not reference the old certificate is
-// left untouched, so the operator never attaches certificates on its own.
-func (s *HetznerCloudStore) updateServices(ctx context.Context, oldRefs []string, newID int64) error {
+// ensureServices makes each listed Service reference the current certificate,
+// covering the first attach, renewals under a new name, and drift.
+func (s *HetznerCloudStore) ensureServices(ctx context.Context, staleRefs []string, newID int64) error {
 	var errs []string
 	for _, ref := range s.Services {
-		l := log.WithFields(log.Fields{"store": "hetznercloud", "service": ref.String(), "newCertId": newID})
+		l := log.WithFields(log.Fields{"store": "hetznercloud", "service": ref.String(), "certId": newID})
 		svc, err := state.KubeClient.CoreV1().Services(ref.Namespace).Get(ctx, ref.Name, metav1.GetOptions{})
 		if err != nil {
 			errs = append(errs, fmt.Sprintf("get service %s: %v", ref, err))
 			continue
 		}
 		current := svc.Annotations[ccmCertificatesAnnotation]
-		updated, replaced := replaceCertRefs(current, oldRefs, newID)
-		if !replaced {
-			l.WithField("annotation", current).Warn("service does not reference the previous certificate; not updating it")
+		updated := pointCertRefs(current, staleRefs, newID)
+		if updated == current {
 			continue
 		}
 		patch, _ := json.Marshal(map[string]any{
-			"metadata": map[string]any{"annotations": map[string]string{ccmCertificatesAnnotation: updated}},
+			"metadata": map[string]any{
+				"resourceVersion": svc.ResourceVersion,
+				"annotations":     map[string]string{ccmCertificatesAnnotation: updated},
+			},
 		})
 		if _, err := state.KubeClient.CoreV1().Services(ref.Namespace).Patch(ctx, ref.Name, k8stypes.MergePatchType, patch, metav1.PatchOptions{}); err != nil {
 			errs = append(errs, fmt.Sprintf("patch service %s: %v", ref, err))
 			continue
 		}
-		l.WithField("annotation", updated).Info("service certificate annotation updated")
+		l.WithFields(log.Fields{"from": current, "to": updated}).Info("service certificate annotation updated")
 	}
 	if len(errs) > 0 {
 		return fmt.Errorf("updating services: %s", strings.Join(errs, "; "))
@@ -127,63 +130,61 @@ func (s *HetznerCloudStore) updateServices(ctx context.Context, oldRefs []string
 	return nil
 }
 
-// deleteIfUnused deletes the certificate when no Load Balancer uses it. It
-// returns true when the certificate is gone (deleted now or already absent).
-func deleteIfUnused(ctx context.Context, client *hcloud.Client, id int64) (bool, error) {
-	cert, _, err := client.Certificate.GetByID(ctx, id)
-	if err != nil {
-		return false, err
-	}
-	if cert == nil {
-		return true, nil
-	}
-	if len(cert.UsedBy) > 0 {
-		return false, nil
-	}
-	if _, err := client.Certificate.Delete(ctx, cert); err != nil {
-		if hcloud.IsError(err, hcloud.ErrorCodeNotFound) {
-			return true, nil
-		}
-		return false, err
-	}
-	return true, nil
+// ownedCertificates lists the certificates carrying this sync's owner label.
+func ownedCertificates(ctx context.Context, client *hcloud.Client, owner string) ([]*hcloud.Certificate, error) {
+	return client.Certificate.AllWithOpts(ctx, hcloud.CertificateListOpts{
+		ListOpts: hcloud.ListOpts{LabelSelector: ownerLabel + "=" + owner},
+	})
 }
 
-// waitAndDelete polls until the certificate is released (the CCM reconciles
-// the Service update within seconds) and deletes it. It returns false if the
-// certificate is still in use after unusedPollTimeout.
-func waitAndDelete(ctx context.Context, client *hcloud.Client, id int64) bool {
-	l := log.WithFields(log.Fields{"store": "hetznercloud", "oldCertId": id})
-	deadline := time.Now().Add(unusedPollTimeout)
-	for {
-		deleted, err := deleteIfUnused(ctx, client, id)
+// deleteUnused deletes the given certificates that no Load Balancer uses and
+// returns the ones that are still attached.
+func deleteUnused(ctx context.Context, client *hcloud.Client, certs []*hcloud.Certificate) []*hcloud.Certificate {
+	var attached []*hcloud.Certificate
+	for _, c := range certs {
+		l := log.WithFields(log.Fields{"store": "hetznercloud", "certId": c.ID, "certName": c.Name})
+		fresh, _, err := client.Certificate.GetByID(ctx, c.ID)
 		if err != nil {
+			l.WithError(err).Warn("failed to read superseded certificate")
+			attached = append(attached, c)
+			continue
+		}
+		if fresh == nil {
+			continue
+		}
+		if len(fresh.UsedBy) > 0 {
+			attached = append(attached, fresh)
+			continue
+		}
+		if _, err := client.Certificate.Delete(ctx, fresh); err != nil && !hcloud.IsError(err, hcloud.ErrorCodeNotFound) {
 			l.WithError(err).Warn("failed to delete superseded certificate")
+			attached = append(attached, fresh)
+			continue
 		}
-		if deleted {
-			l.Info("superseded certificate deleted")
-			return true
-		}
-		if time.Now().After(deadline) {
-			l.Warn("superseded certificate still in use; will retry on next sync")
-			return false
-		}
-		time.Sleep(unusedPollInterval)
+		l.Info("superseded certificate deleted")
 	}
+	return attached
 }
 
-// cleanupPending retries deleting certificates superseded by earlier syncs and
-// returns the IDs that are still in use.
-func cleanupPending(ctx context.Context, client *hcloud.Client, ids []int64) []int64 {
-	var remaining []int64
-	for _, id := range ids {
-		deleted, err := deleteIfUnused(ctx, client, id)
-		if err != nil {
-			log.WithFields(log.Fields{"store": "hetznercloud", "oldCertId": id}).WithError(err).Warn("failed to delete superseded certificate")
-		}
-		if !deleted {
-			remaining = append(remaining, id)
-		}
+// retryDetached keeps trying to delete certificates that were still attached,
+// giving the CCM time to move the Load Balancer to the new certificate. Anything
+// left after detachRetryTimeout is picked up by the next sync of the secret.
+func retryDetached(client *hcloud.Client, certs []*hcloud.Certificate) {
+	if len(certs) == 0 {
+		return
 	}
-	return remaining
+	backgroundCleanups.Add(1)
+	go func() {
+		defer backgroundCleanups.Done()
+		ctx := context.Background()
+		deadline := time.Now().Add(detachRetryTimeout)
+		for len(certs) > 0 && time.Now().Before(deadline) {
+			time.Sleep(detachRetryInterval)
+			certs = deleteUnused(ctx, client, certs)
+		}
+		for _, c := range certs {
+			log.WithFields(log.Fields{"store": "hetznercloud", "certId": c.ID, "certName": c.Name}).
+				Warn("superseded certificate still attached; it will be retried on the next sync")
+		}
+	}()
 }
