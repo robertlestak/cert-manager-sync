@@ -271,6 +271,7 @@ Annotations:
     cert-manager-sync.lestak.sh/hetznercloud-secret-name: "example-hetzner-secret" # secret in same namespace which contains the hetzner cloud api token. If provided in format "namespace/secret-name", will look in that namespace for the secret
     cert-manager-sync.lestak.sh/hetznercloud-cert-name: "my-cert" # unique name to give your cert in Hetzner Cloud (optional, defaults to secret name)
     cert-manager-sync.lestak.sh/hetznercloud-cert-id: "" # will be auto-filled by operator for in-place renewals
+    cert-manager-sync.lestak.sh/hetznercloud-services: "traefik/traefik" # (optional) comma-separated namespace/name of LoadBalancer Services to keep on the current certificate, see below
     cert-manager-sync.lestak.sh/hetznercloud-label-environment: "production" # (optional) add labels to the certificate in Hetzner Cloud
     cert-manager-sync.lestak.sh/hetznercloud-label-team: "devops" # (optional) add more labels as needed
 ```
@@ -279,31 +280,25 @@ Annotations:
 
 When cert-manager-sync updates a certificate in Hetzner Cloud:
 
-1. **Certificate NOT in use**: The old certificate is deleted and a new one is created with the same name. No action required.
+Every certificate it uploads gets a `cert-manager-sync.lestak.sh/owner` label derived from the secret and the certificate name. On each sync, all earlier copies with that label (plus the certificate recorded in `hetznercloud-cert-id`) are treated as superseded:
 
-2. **Certificate in use by Load Balancer**: Since Hetzner Cloud prevents deletion of certificates that are in use:
-   - A new certificate is created with a modified name: `original-name-{old-cert-id}`
-   - The old certificate remains attached to the Load Balancer
-   - **Manual action required**: Update your Load Balancer to use the new certificate
+1. **Not in use**: deleted before the new certificate is uploaded, so the new one keeps the same name. This also cleans up copies left behind by an interrupted sync, for example one that uploaded a certificate but restarted before recording its ID.
+2. **In use by a Load Balancer**: Hetzner Cloud refuses to delete it, so the new certificate is uploaded as `original-name-{old-cert-id}`. The old one is deleted in the background as soon as it is detached (retried for 5 minutes without blocking other syncs, then again on the next sync of the secret).
 
-**Important for Hetzner Cloud Controller Manager users:**
+**Hetzner Cloud Controller Manager users:**
 
-The Hetzner Cloud Controller Manager (for Kubernetes LoadBalancer services) identifies certificates by their exact name or ID specified in the annotation:
+The Hetzner Cloud Controller Manager identifies certificates by the exact name or ID in the Service annotation:
 ```yaml
 load-balancer.hetzner.cloud/http-certificates: "my-cert-name"
 ```
 
-When cert-manager-sync creates a new certificate with a modified name (due to the old one being in use), you must:
-1. Update the annotation to the new certificate name
-2. Apply the service changes to trigger the Load Balancer update
+Set `cert-manager-sync.lestak.sh/hetznercloud-services` to the Services that should use the certificate, and enable `clusterRole.patchServices` in the Helm chart. On every sync the operator makes each listed Service's `load-balancer.hetzner.cloud/http-certificates` reference the current certificate ID: it replaces references to superseded copies, adds the certificate if it's missing (first attach), and keeps any other certificates in the list. The cloud controller manager then moves the Load Balancer over, and the old certificate is deleted once it's detached.
 
-**Example workflow for certificate renewal when in use:**
-1. cert-manager renews the certificate
-2. cert-manager-sync attempts to update in Hetzner Cloud
-3. If the old certificate is in use, a new one is created as `my-cert-name-12345`
-4. Update your service annotation: `load-balancer.hetzner.cloud/http-certificates: "my-cert-name-12345"`
-5. Apply the service to update the Load Balancer
-6. Once updated, the old certificate can be manually deleted from Hetzner Cloud Console
+If the Service is rendered by Helm or another tool, leave `load-balancer.hetzner.cloud/http-certificates` out of its manifest so the two don't fight over the value.
+
+Without `hetznercloud-services`, update the Service annotation yourself after a renewal; the old certificate is cleaned up automatically once it's detached.
+
+Only put inputs (`hetznercloud-enabled`, `-secret-name`, `-cert-name`, `-services`, labels) in a cert-manager `Certificate`'s `spec.secretTemplate.annotations`. cert-manager resets template keys to their template values, which would wipe the `hetznercloud-cert-id` the operator writes back.
 
 **Labels Support:**
 Certificates can be labeled for organization and tracking purposes. Use annotations like:
@@ -348,6 +343,25 @@ go test ./stores/hetznercloud/... -v
 ```
 
 **Note**: Use a test project token to avoid affecting production resources. The test will create and clean up test certificates in the project associated with the API token.
+
+#### Upgrading from versions without owner labels
+
+Certificates uploaded by earlier versions have no `cert-manager-sync.lestak.sh/owner` label. On the first sync after upgrading, the certificate recorded in `hetznercloud-cert-id` is adopted: it gets the label and is reused if its content hasn't changed, otherwise replaced and cleaned up as usual. Copies created by earlier in-use renewals (`original-name-{old-cert-id}`) aren't tracked anywhere and need a one-off manual cleanup.
+
+To list them, with `rpc-cert` as the configured `hetznercloud-cert-name` (or the secret name if unset):
+
+```bash
+hcloud certificate list -o json | jq -r --arg base rpc-cert '.[]
+  | select(.type == "uploaded"
+      and (.labels["cert-manager-sync.lestak.sh/owner"] // "") == ""
+      and (.used_by | length) == 0
+      and (.name | test("^" + $base + "-[0-9]+$")))
+  | "\(.id)\t\(.name)"'
+```
+
+Check the list, then delete with `hcloud certificate delete <id>`. Certificates still attached to a Load Balancer are excluded; move the Service to the current certificate first.
+
+To have the operator manage existing Services, add `cert-manager-sync.lestak.sh/hetznercloud-services`, set `clusterRole.patchServices: true`, and remove `load-balancer.hetzner.cloud/http-certificates` from any Helm-rendered Service manifest. The next sync points those Services at the current certificate.
 
 ### Incapsula
 
@@ -587,6 +601,7 @@ metadata:
     cert-manager-sync.lestak.sh/hetznercloud-secret-name: "example-hetzner-secret" # secret in same namespace which contains hetzner cloud api token
     cert-manager-sync.lestak.sh/hetznercloud-cert-name: "my-cert" # unique name to give your cert in Hetzner Cloud
     cert-manager-sync.lestak.sh/hetznercloud-cert-id: "" # will be auto-filled by operator for in-place renewals
+    cert-manager-sync.lestak.sh/hetznercloud-services: "traefik/traefik" # (optional) comma-separated namespace/name of LoadBalancer Services to keep on the current certificate
     cert-manager-sync.lestak.sh/incapsula-site-id: "12345" # incapsula site to attach cert
     cert-manager-sync.lestak.sh/incapsula-secret-name: "cert-manager-sync-poc" # secret in same namespace which contains incapsula api key
     cert-manager-sync.lestak.sh/threatx-hostname: "example.com" # threatx hostname to attach cert
