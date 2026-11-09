@@ -2,6 +2,8 @@ package hetznercloud
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/pem"
 	"fmt"
 	"strconv"
 	"strings"
@@ -152,6 +154,20 @@ func (s *HetznerCloudStore) Sync(c *tlssecret.Certificate) (map[string]string, e
 		}
 	}
 
+	// Hetzner Cloud rejects uploading the same certificate twice. If an earlier
+	// copy already holds this exact certificate (e.g. a re-sync after only the
+	// annotations changed), keep using it instead of uploading.
+	var cert *hcloud.Certificate
+	if fp, err := leafFingerprint(c.Certificate); err == nil {
+		for i, old := range superseded {
+			if strings.EqualFold(old.Fingerprint, fp) {
+				cert = old
+				superseded = append(superseded[:i:i], superseded[i+1:]...)
+				break
+			}
+		}
+	}
+
 	var staleRefs []string
 	for _, old := range superseded {
 		staleRefs = append(staleRefs, strconv.FormatInt(old.ID, 10), old.Name)
@@ -161,30 +177,42 @@ func (s *HetznerCloudStore) Sync(c *tlssecret.Certificate) (map[string]string, e
 	// deleting unused copies first; if one holding the name is still attached
 	// to a Load Balancer, upload under a new name instead.
 	superseded = deleteUnused(ctx, client, superseded)
-	for holder := certHolder(superseded, certName); holder != nil; holder = certHolder(superseded, certName) {
-		l.Warnf("certificate %d is in use by %d resources, uploading under a new name", holder.ID, len(holder.UsedBy))
-		certName = fmt.Sprintf("%s-%d", certName, holder.ID)
-	}
 
-	createOpts := hcloud.CertificateCreateOpts{
-		Name:        certName,
-		Type:        hcloud.CertificateTypeUploaded,
-		Certificate: string(c.Certificate),
-		PrivateKey:  string(c.Key),
-		Labels:      labels,
-	}
+	if cert != nil {
+		if cert.Labels[ownerLabel] != owner {
+			if _, _, err := client.Certificate.Update(ctx, cert, hcloud.CertificateUpdateOpts{Labels: mergeLabels(cert.Labels, labels)}); err != nil {
+				l.WithError(err).Warn("failed to label existing certificate")
+			}
+		}
+		l.WithField("id", cert.ID).Debug("certificate already uploaded, reusing it")
+	} else {
+		for holder := certHolder(superseded, certName); holder != nil; holder = certHolder(superseded, certName) {
+			l.Warnf("certificate %d is in use by %d resources, uploading under a new name", holder.ID, len(holder.UsedBy))
+			certName = fmt.Sprintf("%s-%d", certName, holder.ID)
+		}
 
-	l.WithField("name", certName).Debugf("creating new certificate")
-	cert, _, err := client.Certificate.Create(ctx, createOpts)
-	if err != nil {
-		l.WithError(err).Errorf("failed to create certificate")
-		return nil, err
+		createOpts := hcloud.CertificateCreateOpts{
+			Name:        certName,
+			Type:        hcloud.CertificateTypeUploaded,
+			Certificate: string(c.Certificate),
+			PrivateKey:  string(c.Key),
+			Labels:      labels,
+		}
+
+		l.WithField("name", certName).Debugf("creating new certificate")
+		cert, _, err = client.Certificate.Create(ctx, createOpts)
+		if err != nil {
+			l.WithError(err).Errorf("failed to create certificate")
+			return nil, err
+		}
 	}
 
 	l = l.WithField("id", cert.ID)
 	s.CertId = cert.ID
 
 	if len(s.Services) > 0 {
+		// A reference to the current certificate by name becomes its ID too.
+		staleRefs = append(staleRefs, cert.Name)
 		if err := s.ensureServices(ctx, staleRefs, cert.ID); err != nil {
 			// Fail the sync so it is retried; the certificate uploaded here is
 			// owner-labelled and gets replaced by the retry.
@@ -234,6 +262,32 @@ func (s *HetznerCloudStore) Delete(ctx context.Context) error {
 	}
 	l.Info("certificate deleted from hetznercloud")
 	return nil
+}
+
+// leafFingerprint returns the SHA-256 fingerprint of the first certificate in
+// a PEM bundle, in the colon-separated form Hetzner Cloud reports.
+func leafFingerprint(pemBundle []byte) (string, error) {
+	block, _ := pem.Decode(pemBundle)
+	if block == nil {
+		return "", fmt.Errorf("no PEM block found")
+	}
+	sum := sha256.Sum256(block.Bytes)
+	parts := make([]string, len(sum))
+	for i, b := range sum {
+		parts[i] = fmt.Sprintf("%02X", b)
+	}
+	return strings.Join(parts, ":"), nil
+}
+
+func mergeLabels(base, extra map[string]string) map[string]string {
+	out := map[string]string{}
+	for k, v := range base {
+		out[k] = v
+	}
+	for k, v := range extra {
+		out[k] = v
+	}
+	return out
 }
 
 func certHolder(certs []*hcloud.Certificate, name string) *hcloud.Certificate {

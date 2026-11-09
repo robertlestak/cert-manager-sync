@@ -344,6 +344,25 @@ go test ./stores/hetznercloud/... -v
 
 **Note**: Use a test project token to avoid affecting production resources. The test will create and clean up test certificates in the project associated with the API token.
 
+#### Upgrading from versions without owner labels
+
+Certificates uploaded by earlier versions have no `cert-manager-sync.lestak.sh/owner` label. On the first sync after upgrading, the certificate recorded in `hetznercloud-cert-id` is adopted: it gets the label and is reused if its content hasn't changed, otherwise replaced and cleaned up as usual. Copies created by earlier in-use renewals (`original-name-{old-cert-id}`) aren't tracked anywhere and need a one-off manual cleanup.
+
+To list them, with `rpc-cert` as the configured `hetznercloud-cert-name` (or the secret name if unset):
+
+```bash
+hcloud certificate list -o json | jq -r --arg base rpc-cert '.[]
+  | select(.type == "uploaded"
+      and (.labels["cert-manager-sync.lestak.sh/owner"] // "") == ""
+      and (.used_by | length) == 0
+      and (.name | test("^" + $base + "-[0-9]+$")))
+  | "\(.id)\t\(.name)"'
+```
+
+Check the list, then delete with `hcloud certificate delete <id>`. Certificates still attached to a Load Balancer are excluded; move the Service to the current certificate first.
+
+To have the operator manage existing Services, add `cert-manager-sync.lestak.sh/hetznercloud-services`, set `clusterRole.patchServices: true`, and remove `load-balancer.hetzner.cloud/http-certificates` from any Helm-rendered Service manifest. The next sync points those Services at the current certificate.
+
 ### Incapsula
 
 Create an Incapsula API Key and create a kube secret containing this key.

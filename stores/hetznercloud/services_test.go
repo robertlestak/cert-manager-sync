@@ -229,3 +229,75 @@ func TestIntegrationSyncCleansOrphans(t *testing.T) {
 		assert.Equal(t, certName, owned[0].Name)
 	}
 }
+
+func TestLeafFingerprint(t *testing.T) {
+	pem, _, err := generateTestCertificate()
+	assert.NoError(t, err)
+	fp, err := leafFingerprint(pem)
+	assert.NoError(t, err)
+	assert.Len(t, fp, 95) // 32 bytes as colon-separated hex
+	_, err = leafFingerprint([]byte("not pem"))
+	assert.Error(t, err)
+}
+
+// TestIntegrationUpgradeReusesAttachedCertificate covers turning on
+// hetznercloud-services for a certificate uploaded by an older version: it has
+// no owner label and is attached to a Load Balancer. Re-syncing the same
+// certificate must not try to upload a duplicate (Hetzner rejects that); it
+// must adopt the existing one and point the Service at it.
+func TestIntegrationUpgradeReusesAttachedCertificate(t *testing.T) {
+	client, apiToken := integrationClient(t)
+	ctx := context.Background()
+	certName := fmt.Sprintf("cert-sync-upgrade-test-%d", time.Now().UnixNano())
+	owner := ownerValue("traefik", "rpc", certName)
+	t.Cleanup(func() { deleteOwned(client, owner) })
+
+	pem, key, _ := generateTestCertificate()
+	legacy, _, err := client.Certificate.Create(ctx, hcloud.CertificateCreateOpts{
+		Name: certName, Type: hcloud.CertificateTypeUploaded, Certificate: string(pem), PrivateKey: string(key),
+	})
+	if !assert.NoError(t, err) {
+		return
+	}
+	t.Cleanup(func() { _, _ = client.Certificate.Delete(ctx, legacy) })
+
+	intPtr := func(i int) *int { return &i }
+	lbRes, _, err := client.LoadBalancer.Create(ctx, hcloud.LoadBalancerCreateOpts{
+		Name:             certName,
+		LoadBalancerType: &hcloud.LoadBalancerType{Name: "lb11"},
+		Location:         &hcloud.Location{Name: "nbg1"},
+		Services: []hcloud.LoadBalancerCreateOptsService{{
+			Protocol: hcloud.LoadBalancerServiceProtocolHTTPS, ListenPort: intPtr(443), DestinationPort: intPtr(80),
+			HTTP: &hcloud.LoadBalancerCreateOptsServiceHTTP{Certificates: []*hcloud.Certificate{{ID: legacy.ID}}},
+		}},
+	})
+	if !assert.NoError(t, err) {
+		return
+	}
+	// Registered after the certificate cleanup, so it runs first and frees it.
+	t.Cleanup(func() { _, _ = client.LoadBalancer.Delete(ctx, lbRes.LoadBalancer) })
+	_ = client.Action.WaitFor(ctx, lbRes.Action)
+
+	oldKube := state.KubeClient
+	state.KubeClient = fake.NewSimpleClientset(&corev1.Service{ObjectMeta: metav1.ObjectMeta{
+		Name: "traefik-https", Namespace: "traefik",
+		Annotations: map[string]string{ccmCertificatesAnnotation: certName},
+	}})
+	t.Cleanup(func() { state.KubeClient = oldKube })
+
+	s := &HetznerCloudStore{ApiToken: apiToken, CertName: certName, CertId: legacy.ID, ServicesRaw: "traefik/traefik-https"}
+	u, err := s.Sync(&tlssecret.Certificate{SecretName: "rpc", Namespace: "traefik", Certificate: pem, Key: key})
+	if !assert.NoError(t, err) {
+		return
+	}
+	backgroundCleanups.Wait()
+	assert.Empty(t, u["cert-id"], "the recorded certificate is reused, so cert-id doesn't change")
+
+	adopted, _, err := client.Certificate.GetByID(ctx, legacy.ID)
+	assert.NoError(t, err)
+	if assert.NotNil(t, adopted) {
+		assert.Equal(t, owner, adopted.Labels[ownerLabel])
+	}
+	svc, _ := state.KubeClient.CoreV1().Services("traefik").Get(ctx, "traefik-https", metav1.GetOptions{})
+	assert.Equal(t, strconv.FormatInt(legacy.ID, 10), svc.Annotations[ccmCertificatesAnnotation])
+}
