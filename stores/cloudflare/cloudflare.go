@@ -1,7 +1,9 @@
 package cloudflare
 
 import (
+	"bytes"
 	"context"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"strings"
@@ -197,18 +199,40 @@ func (s *CloudflareStore) syncCustomCertificate(ctx context.Context, client *clo
 // Origin Pulls. The CA certificate is deliberately left out: Cloudflare rejects
 // anything but a leaf here. The API has no update method, so a renewal uploads
 // a new certificate and then drops the one it replaced.
+//
+// A sync also runs when only the operator annotations changed (the certificate
+// did not). Cloudflare refuses to upload the same certificate twice (error
+// 1406), so the certificate already in the zone is reused instead.
 func (s *CloudflareStore) syncOriginPull(ctx context.Context, client *cloudflare.Client, c *tlssecret.Certificate, l *log.Entry) error {
-	cert, err := client.OriginTLSClientAuth.New(ctx, origin_tls_client_auth.OriginTLSClientAuthNewParams{
-		ZoneID:      cloudflare.F(s.ZoneId),
-		Certificate: cloudflare.F(string(c.Certificate)),
-		PrivateKey:  cloudflare.F(string(c.Key)),
-	})
+	certID, err := s.existingOriginPullCert(ctx, client, c)
 	if err != nil {
-		l.WithError(err).Errorf("cloudflare.OriginTLSClientAuth.New error")
-		return fmt.Errorf("failed to upload origin pull certificate to Cloudflare (zone: %s): %w", s.ZoneId, err)
+		return err
+	}
+	if certID == "" {
+		cert, err := client.OriginTLSClientAuth.New(ctx, origin_tls_client_auth.OriginTLSClientAuthNewParams{
+			ZoneID:      cloudflare.F(s.ZoneId),
+			Certificate: cloudflare.F(string(c.Certificate)),
+			PrivateKey:  cloudflare.F(string(c.Key)),
+		})
+		if err != nil && isCloudflareErrorCode(err, cloudflareCodeCertificateExists) {
+			// Uploaded by an earlier sync whose cert-id never made it back to
+			// the secret: look it up.
+			certID, err = s.findOriginPullCert(ctx, client, c)
+			if err == nil && certID == "" {
+				err = fmt.Errorf("cloudflare reports the certificate already exists but it is not listed in zone %s", s.ZoneId)
+			}
+		} else if err == nil {
+			certID = cert.ID
+		}
+		if err != nil {
+			l.WithError(err).Errorf("cloudflare.OriginTLSClientAuth.New error")
+			return fmt.Errorf("failed to upload origin pull certificate to Cloudflare (zone: %s): %w", s.ZoneId, err)
+		}
+	} else {
+		l.WithField("certId", certID).Debug("origin pull certificate already uploaded, reusing it")
 	}
 	replacedCertId := s.CertId
-	s.CertId = cert.ID
+	s.CertId = certID
 	if replacedCertId == "" || replacedCertId == s.CertId {
 		return nil
 	}
@@ -222,22 +246,84 @@ func (s *CloudflareStore) syncOriginPull(ctx context.Context, client *cloudflare
 	return nil
 }
 
+// existingOriginPullCert returns s.CertId when the zone-level certificate it
+// points at is the one being synced, and "" when a new upload is needed.
+func (s *CloudflareStore) existingOriginPullCert(ctx context.Context, client *cloudflare.Client, c *tlssecret.Certificate) (string, error) {
+	if s.CertId == "" {
+		return "", nil
+	}
+	cert, err := client.OriginTLSClientAuth.Get(ctx, s.CertId, origin_tls_client_auth.OriginTLSClientAuthGetParams{
+		ZoneID: cloudflare.F(s.ZoneId),
+	})
+	if err != nil {
+		if isCloudflareNotFound(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("failed to read origin pull certificate %s from Cloudflare (zone: %s): %w", s.CertId, s.ZoneId, err)
+	}
+	if sameCertificate(cert.Certificate, c.Certificate) {
+		return s.CertId, nil
+	}
+	return "", nil
+}
+
+// findOriginPullCert looks for the zone-level certificate matching c.
+func (s *CloudflareStore) findOriginPullCert(ctx context.Context, client *cloudflare.Client, c *tlssecret.Certificate) (string, error) {
+	iter := client.OriginTLSClientAuth.ListAutoPaging(ctx, origin_tls_client_auth.OriginTLSClientAuthListParams{
+		ZoneID: cloudflare.F(s.ZoneId),
+	})
+	for iter.Next() {
+		if cert := iter.Current(); sameCertificate(cert.Certificate, c.Certificate) {
+			return cert.ID, nil
+		}
+	}
+	if err := iter.Err(); err != nil {
+		return "", fmt.Errorf("failed to list origin pull certificates in Cloudflare (zone: %s): %w", s.ZoneId, err)
+	}
+	return "", nil
+}
+
 // syncOriginPullHostname uploads the leaf and key as a per-hostname
 // Authenticated Origin Pulls certificate, then associates it with the
 // configured hostnames. Like the zone-level endpoint it has no update method,
 // so a renewal uploads a new certificate and drops the one it replaced.
+//
+// When the certificate is already uploaded (the sync was triggered by an
+// annotation change, e.g. a new hostname), it is reused and only the
+// association is updated: uploading it again fails with Cloudflare error 1406
+// before the new hostnames are associated.
 func (s *CloudflareStore) syncOriginPullHostname(ctx context.Context, client *cloudflare.Client, c *tlssecret.Certificate, l *log.Entry) error {
-	cert, err := client.OriginTLSClientAuth.Hostnames.Certificates.New(ctx, origin_tls_client_auth.HostnameCertificateNewParams{
-		ZoneID:      cloudflare.F(s.ZoneId),
-		Certificate: cloudflare.F(string(c.Certificate)),
-		PrivateKey:  cloudflare.F(string(c.Key)),
-	})
+	certID, err := s.existingOriginPullHostnameCert(ctx, client, c)
 	if err != nil {
-		l.WithError(err).Errorf("cloudflare.OriginTLSClientAuth.Hostnames.Certificates.New error")
-		return fmt.Errorf("failed to upload per-hostname origin pull certificate to Cloudflare (zone: %s): %w", s.ZoneId, err)
+		return err
+	}
+	uploaded := false
+	if certID == "" {
+		cert, err := client.OriginTLSClientAuth.Hostnames.Certificates.New(ctx, origin_tls_client_auth.HostnameCertificateNewParams{
+			ZoneID:      cloudflare.F(s.ZoneId),
+			Certificate: cloudflare.F(string(c.Certificate)),
+			PrivateKey:  cloudflare.F(string(c.Key)),
+		})
+		if err != nil && isCloudflareErrorCode(err, cloudflareCodeCertificateExists) {
+			// Uploaded by an earlier sync whose cert-id never made it back to
+			// the secret: look it up.
+			certID, err = s.findOriginPullHostnameCert(ctx, client, c)
+			if err == nil && certID == "" {
+				err = fmt.Errorf("cloudflare reports the certificate already exists but it is not listed in zone %s", s.ZoneId)
+			}
+		} else if err == nil {
+			certID = cert.ID
+			uploaded = true
+		}
+		if err != nil {
+			l.WithError(err).Errorf("cloudflare.OriginTLSClientAuth.Hostnames.Certificates.New error")
+			return fmt.Errorf("failed to upload per-hostname origin pull certificate to Cloudflare (zone: %s): %w", s.ZoneId, err)
+		}
+	} else {
+		l.WithField("certId", certID).Debug("per-hostname origin pull certificate already uploaded, reusing it")
 	}
 	replacedCertId := s.CertId
-	s.CertId = cert.ID
+	s.CertId = certID
 
 	// Associating the hostnames is what puts the new certificate in use, so it
 	// has to succeed before the one it replaces is removed.
@@ -254,15 +340,18 @@ func (s *CloudflareStore) syncOriginPullHostname(ctx context.Context, client *cl
 		Config: cloudflare.F(configs),
 	}); err != nil {
 		l.WithError(err).Errorf("cloudflare.OriginTLSClientAuth.Hostnames.Update error")
-		// The upload landed but is associated with nothing. Drop it, otherwise
-		// every retry of this sync leaves another unused certificate behind.
-		if _, derr := client.OriginTLSClientAuth.Hostnames.Certificates.Delete(ctx, s.CertId, origin_tls_client_auth.HostnameCertificateDeleteParams{
-			ZoneID: cloudflare.F(s.ZoneId),
-		}); derr != nil && !isCloudflareNotFound(derr) {
-			l.WithError(derr).WithField("certId", s.CertId).Warn("failed to remove unassociated origin pull certificate")
+		// A certificate uploaded by this sync is associated with nothing. Drop
+		// it, otherwise every retry leaves another unused certificate behind.
+		// A reused one may still serve the previous hostnames: keep it.
+		if uploaded {
+			if _, derr := client.OriginTLSClientAuth.Hostnames.Certificates.Delete(ctx, s.CertId, origin_tls_client_auth.HostnameCertificateDeleteParams{
+				ZoneID: cloudflare.F(s.ZoneId),
+			}); derr != nil && !isCloudflareNotFound(derr) {
+				l.WithError(derr).WithField("certId", s.CertId).Warn("failed to remove unassociated origin pull certificate")
+			}
+			s.CertId = replacedCertId
 		}
-		s.CertId = replacedCertId
-		return fmt.Errorf("failed to associate hostnames [%s] with certificate %s (zone: %s): %w", strings.Join(s.Hostnames, ", "), cert.ID, s.ZoneId, err)
+		return fmt.Errorf("failed to associate hostnames [%s] with certificate %s (zone: %s): %w", strings.Join(s.Hostnames, ", "), certID, s.ZoneId, err)
 	}
 
 	if replacedCertId == "" || replacedCertId == s.CertId {
@@ -276,6 +365,84 @@ func (s *CloudflareStore) syncOriginPullHostname(ctx context.Context, client *cl
 		l.WithError(err).WithField("replacedId", replacedCertId).Warn("failed to remove replaced per-hostname origin pull certificate")
 	}
 	return nil
+}
+
+// existingOriginPullHostnameCert returns s.CertId when the per-hostname
+// certificate it points at is the one being synced, and "" when a new upload
+// is needed.
+func (s *CloudflareStore) existingOriginPullHostnameCert(ctx context.Context, client *cloudflare.Client, c *tlssecret.Certificate) (string, error) {
+	if s.CertId == "" {
+		return "", nil
+	}
+	cert, err := client.OriginTLSClientAuth.Hostnames.Certificates.Get(ctx, s.CertId, origin_tls_client_auth.HostnameCertificateGetParams{
+		ZoneID: cloudflare.F(s.ZoneId),
+	})
+	if err != nil {
+		if isCloudflareNotFound(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("failed to read per-hostname origin pull certificate %s from Cloudflare (zone: %s): %w", s.CertId, s.ZoneId, err)
+	}
+	if sameCertificate(cert.Certificate, c.Certificate) {
+		return s.CertId, nil
+	}
+	return "", nil
+}
+
+// findOriginPullHostnameCert looks for the per-hostname certificate matching c.
+func (s *CloudflareStore) findOriginPullHostnameCert(ctx context.Context, client *cloudflare.Client, c *tlssecret.Certificate) (string, error) {
+	iter := client.OriginTLSClientAuth.Hostnames.Certificates.ListAutoPaging(ctx, origin_tls_client_auth.HostnameCertificateListParams{
+		ZoneID: cloudflare.F(s.ZoneId),
+	})
+	for iter.Next() {
+		if cert := iter.Current(); sameCertificate(cert.Certificate, c.Certificate) {
+			return cert.ID, nil
+		}
+	}
+	if err := iter.Err(); err != nil {
+		return "", fmt.Errorf("failed to list per-hostname origin pull certificates in Cloudflare (zone: %s): %w", s.ZoneId, err)
+	}
+	return "", nil
+}
+
+// sameCertificate reports whether two PEM documents hold the same leaf
+// certificate. Cloudflare may return the PEM re-encoded, so the first
+// CERTIFICATE blocks are compared as DER.
+func sameCertificate(a string, b []byte) bool {
+	da, db := firstCertificateDER([]byte(a)), firstCertificateDER(b)
+	return da != nil && db != nil && bytes.Equal(da, db)
+}
+
+func firstCertificateDER(data []byte) []byte {
+	for {
+		var block *pem.Block
+		block, data = pem.Decode(data)
+		if block == nil {
+			return nil
+		}
+		if block.Type == "CERTIFICATE" {
+			return block.Bytes
+		}
+	}
+}
+
+// cloudflareCodeCertificateExists is returned when uploading a certificate the
+// zone already has ("This certificate already exists for this zone.").
+const cloudflareCodeCertificateExists = 1406
+
+// isCloudflareErrorCode reports whether err is a Cloudflare API error carrying
+// the given error code.
+func isCloudflareErrorCode(err error, code int64) bool {
+	var cfErr *cloudflare.Error
+	if !errors.As(err, &cfErr) {
+		return false
+	}
+	for _, e := range cfErr.Errors {
+		if e.Code == code {
+			return true
+		}
+	}
+	return false
 }
 
 // isCloudflareNotFound returns true when the error reports a 404 from the
