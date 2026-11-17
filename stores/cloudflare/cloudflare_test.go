@@ -64,6 +64,92 @@ func TestCloudflareFromConfigParsesNamespacedSecretName(t *testing.T) {
 	assert.Equal(t, "cert", s.CertId)
 }
 
+func TestCloudflareFromConfigParsesMode(t *testing.T) {
+	cases := []struct {
+		name    string
+		value   string
+		want    string
+		wantErr bool
+	}{
+		{name: "origin pull", value: ModeOriginPull, want: ModeOriginPull},
+		{name: "custom certificate", value: ModeCustomCertificate, want: ModeCustomCertificate},
+		{name: "unset defaults to custom certificate", value: "", want: ""},
+		{name: "unknown mode errors", value: "edge", wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &CloudflareStore{}
+			cfg := map[string]string{"zone-id": "zone"}
+			if tc.value != "" {
+				cfg["mode"] = tc.value
+			}
+			err := s.FromConfig(tlssecret.GenericSecretSyncConfig{Config: cfg})
+			if tc.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, tc.want, s.Mode)
+		})
+	}
+}
+
+func TestCloudflareFromConfigParsesHostnames(t *testing.T) {
+	cases := []struct {
+		name      string
+		mode      string
+		hostnames string
+		want      []string
+		wantErr   bool
+	}{
+		{
+			name:      "single hostname",
+			mode:      ModeOriginPullHostname,
+			hostnames: "a.example.com",
+			want:      []string{"a.example.com"},
+		},
+		{
+			name:      "list is split and trimmed",
+			mode:      ModeOriginPullHostname,
+			hostnames: "a.example.com, b.example.com ,,c.example.com,",
+			want:      []string{"a.example.com", "b.example.com", "c.example.com"},
+		},
+		{
+			name:    "per-hostname mode without hostnames errors",
+			mode:    ModeOriginPullHostname,
+			wantErr: true,
+		},
+		{
+			name:      "per-hostname mode with only blanks errors",
+			mode:      ModeOriginPullHostname,
+			hostnames: " , ",
+			wantErr:   true,
+		},
+		{
+			name:      "hostnames without per-hostname mode errors",
+			mode:      ModeOriginPull,
+			hostnames: "a.example.com",
+			wantErr:   true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &CloudflareStore{}
+			cfg := map[string]string{"zone-id": "zone", "mode": tc.mode}
+			if tc.hostnames != "" {
+				cfg["hostnames"] = tc.hostnames
+			}
+			err := s.FromConfig(tlssecret.GenericSecretSyncConfig{Config: cfg})
+			if tc.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, tc.want, s.Hostnames)
+		})
+	}
+}
+
 func TestCloudflareSetDefaultSecretNamespace(t *testing.T) {
 	t.Run("defaults when empty", func(t *testing.T) {
 		s := &CloudflareStore{}
