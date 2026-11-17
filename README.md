@@ -138,7 +138,7 @@ Annotations:
     cert-manager-sync.lestak.sh/cloudflare-secret-name: "example-cloudflare-secret" # secret in same namespace which contains the cloudflare api token. If provided in format "namespace/secret-name", will look in that namespace for the secret
     cert-manager-sync.lestak.sh/cloudflare-zone-id: "example-zone-id" # cloudflare zone id
     cert-manager-sync.lestak.sh/cloudflare-cert-id: "" # will be auto-filled by operator for in-place renewals
-    cert-manager-sync.lestak.sh/cloudflare-mode: "custom-certificate" # "custom-certificate" (default) uploads an edge certificate served to visitors, which must chain to a publicly trusted CA. "origin-pull" uploads a zone-level Authenticated Origin Pulls client certificate that Cloudflare presents to your origin: only the leaf and the key are sent, and the issuing CA may be private. "origin-pull-hostname" does the same, scoped to the hostnames below.
+    cert-manager-sync.lestak.sh/cloudflare-mode: "custom-certificate" # "custom-certificate" (default) uploads an edge certificate served to visitors, which must chain to a publicly trusted CA. "origin-pull" uploads a zone-level Authenticated Origin Pulls client certificate that Cloudflare presents to your origin: the certificate from tls.crt (the leaf and any intermediates) and the key are sent, ca.crt is not, and the issuing CA may be private. "origin-pull-hostname" does the same, scoped to the hostnames below.
     cert-manager-sync.lestak.sh/cloudflare-hostnames: "" # comma-separated fully qualified domain names to associate the certificate with. Required by, and only valid with, mode "origin-pull-hostname"
 ```
 
@@ -154,8 +154,8 @@ interchangeable:
   be bundled using Cloudflare's trust store`.
 - `origin-pull` uploads a **zone-level client certificate for Authenticated
   Origin Pulls**, which Cloudflare presents to your origin so the origin can
-  authenticate incoming requests. Only the leaf certificate and the private key
-  are sent — Cloudflare rejects a CA certificate on this endpoint — and the
+  authenticate incoming requests. The certificate from `tls.crt` (the leaf and
+  any intermediates) and the private key are sent, `ca.crt` is not, and the
   issuing CA may be private, which is the usual setup for origin mTLS.
 - `origin-pull-hostname` uploads the same kind of client certificate, but
   associates it with the hostnames listed in `cloudflare-hostnames` instead of
@@ -599,7 +599,7 @@ metadata:
     cert-manager-sync.lestak.sh/cloudflare-secret-name: "example-cloudflare-secret" # secret in same namespace which contains the cloudflare api token. If provided in format "namespace/secret-name", will look in that namespace for the secret
     cert-manager-sync.lestak.sh/cloudflare-zone-id: "example-zone-id" # cloudflare zone id
     cert-manager-sync.lestak.sh/cloudflare-cert-id: "" # will be auto-filled by operator for in-place renewals
-    cert-manager-sync.lestak.sh/cloudflare-mode: "custom-certificate" # "custom-certificate" (default) uploads an edge certificate served to visitors, which must chain to a publicly trusted CA. "origin-pull" uploads a zone-level Authenticated Origin Pulls client certificate that Cloudflare presents to your origin: only the leaf and the key are sent, and the issuing CA may be private. "origin-pull-hostname" does the same, scoped to the hostnames below.
+    cert-manager-sync.lestak.sh/cloudflare-mode: "custom-certificate" # "custom-certificate" (default) uploads an edge certificate served to visitors, which must chain to a publicly trusted CA. "origin-pull" uploads a zone-level Authenticated Origin Pulls client certificate that Cloudflare presents to your origin: the certificate from tls.crt (the leaf and any intermediates) and the key are sent, ca.crt is not, and the issuing CA may be private. "origin-pull-hostname" does the same, scoped to the hostnames below.
     cert-manager-sync.lestak.sh/cloudflare-hostnames: "" # comma-separated fully qualified domain names to associate the certificate with. Required by, and only valid with, mode "origin-pull-hostname"
     cert-manager-sync.lestak.sh/digitalocean-enabled: "true" # sync certificate to DigitalOcean
     cert-manager-sync.lestak.sh/digitalocean-secret-name: "example-digitalocean-secret" # secret in same namespace which contains the digitalocean api key. If provided in format "namespace/secret-name", will look in that namespace for the secret

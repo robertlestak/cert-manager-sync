@@ -24,8 +24,9 @@ const (
 	// certificate has to chain to a publicly trusted CA.
 	ModeCustomCertificate = "custom-certificate"
 	// ModeOriginPull uploads a zone-level Authenticated Origin Pulls client
-	// certificate that Cloudflare presents to the origin. It takes the leaf and
-	// the private key only, and the issuing CA may be private.
+	// certificate that Cloudflare presents to the origin. It sends the
+	// certificate from tls.crt (the leaf and any intermediates) and the private
+	// key, not ca.crt, and the issuing CA may be private.
 	ModeOriginPull = "origin-pull"
 	// ModeOriginPullHostname is ModeOriginPull scoped to specific hostnames
 	// instead of the whole zone. It requires Hostnames to be set, and takes
@@ -195,10 +196,11 @@ func (s *CloudflareStore) syncCustomCertificate(ctx context.Context, client *clo
 	return nil
 }
 
-// syncOriginPull uploads the leaf certificate and its key for Authenticated
-// Origin Pulls. The CA certificate is deliberately left out: Cloudflare rejects
-// anything but a leaf here. The API has no update method, so a renewal uploads
-// a new certificate and then drops the one it replaced.
+// syncOriginPull uploads the certificate from tls.crt (the leaf and any
+// intermediates) and its key for Authenticated Origin Pulls. ca.crt is not
+// sent: a client certificate is presented without its trust anchor. The API
+// has no update method, so a renewal uploads a new certificate and then drops
+// the one it replaced.
 //
 // A sync also runs when only the operator annotations changed (the certificate
 // did not). Cloudflare refuses to upload the same certificate twice (error
@@ -283,7 +285,8 @@ func (s *CloudflareStore) findOriginPullCert(ctx context.Context, client *cloudf
 	return "", nil
 }
 
-// syncOriginPullHostname uploads the leaf and key as a per-hostname
+// syncOriginPullHostname uploads the certificate from tls.crt (the leaf and
+// any intermediates, not ca.crt) and its key as a per-hostname
 // Authenticated Origin Pulls certificate, then associates it with the
 // configured hostnames. Like the zone-level endpoint it has no update method,
 // so a renewal uploads a new certificate and drops the one it replaced.
@@ -340,8 +343,11 @@ func (s *CloudflareStore) syncOriginPullHostname(ctx context.Context, client *cl
 		Config: cloudflare.F(configs),
 	}); err != nil {
 		l.WithError(err).Errorf("cloudflare.OriginTLSClientAuth.Hostnames.Update error")
-		// A certificate uploaded by this sync is associated with nothing. Drop
-		// it, otherwise every retry leaves another unused certificate behind.
+		// A certificate uploaded by this sync is associated with nothing. Try
+		// to drop it. This is best-effort: Cloudflare refuses to delete a
+		// certificate while it is pending deployment, which it usually still
+		// is right after the upload. A leftover is found and reused by the
+		// next attempt.
 		// A reused one may still serve the previous hostnames: keep it.
 		if uploaded {
 			if _, derr := client.OriginTLSClientAuth.Hostnames.Certificates.Delete(ctx, s.CertId, origin_tls_client_auth.HostnameCertificateDeleteParams{
