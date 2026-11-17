@@ -14,6 +14,7 @@ A Helm chart for cert-manager-sync
 | autoscaling.minReplicas | int | `1` |  |
 | autoscaling.targetCPUUtilizationPercentage | int | `80` |  |
 | clusterRole.create | bool | `true` |  |
+| clusterRole.patchServices | bool | `false` | Allow patching Services, needed for `hetznercloud-services` to keep Load Balancer Services on the current certificate |
 | config.acmAdoptExisting | string | `"false"` | Cluster-wide default for reusing an already-imported ACM certificate tagged for a secret instead of importing a new one. Leave `"false"` if two clusters sync same-named secrets into one AWS account — their tags are identical and they would overwrite each other. See README "Adopting an existing ACM certificate". Per-secret `acm-adopt-existing` annotation overrides this. |
 | config.deleteBlocking | string | `"true"` | When `"true"` (default), finalizers are never force-removed on persistent delete failure — secret deletion blocks until the controller succeeds (Kubernetes-idiomatic finalizer behavior). When "false", the finalizer is force-removed after maxDeleteAttempts so a misconfigured store cannot wedge a secret; the remote certificate may then need manual cleanup. |
 | config.deletePolicy | string | `"retain"` | Cluster-wide default for cleaning up remote certificates when a watched secret is deleted. "retain" (default) leaves remote state untouched. "delete" enables cleanup for every watched secret unless the per-secret delete-policy annotation opts back out. See README "Cleaning up remote certificates on secret deletion". |

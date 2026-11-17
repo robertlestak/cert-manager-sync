@@ -217,8 +217,11 @@ func TestIntegrationSyncWithLabels(t *testing.T) {
 					if err == nil && cert != nil {
 						// Verify labels were applied correctly
 						if tc.valid {
-							// Check that we have the expected number of labels
-							if len(cert.Labels) != len(tc.labels) {
+							// Check that we have the expected number of labels, plus the owner label
+							if cert.Labels[ownerLabel] == "" {
+								t.Errorf("Owner label %s missing: %v", ownerLabel, cert.Labels)
+							}
+							if len(cert.Labels) != len(tc.labels)+1 {
 								t.Errorf("Label count mismatch: expected %d labels, got %d", len(tc.labels), len(cert.Labels))
 								t.Errorf("Expected labels: %v", tc.labels)
 								t.Errorf("Actual labels: %v", cert.Labels)
